@@ -1,0 +1,14 @@
+# PyCharm 配置文件
+.idea/
+*.iml
+
+# Python 环境与缓存
+__pycache__/
+.venv/
+.uv/
+
+# 数据与结果（防止几GB的CSV把GitHub撑爆）
+data/
+results/
+*.csv
+*.log

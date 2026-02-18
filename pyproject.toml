@@ -1,0 +1,13 @@
+[project]
+name = "dualtrack-quant-research"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "backtrader>=1.9.78.123",
+    "lightgbm>=4.6.0",
+    "numpy>=2.4.2",
+    "ollama>=0.6.1",
+    "pandas>=3.0.1",
+    "scikit-learn>=1.8.0",
+]
