@@ -2,6 +2,11 @@
 .idea/
 *.iml
 
+# 环境变量（包含 API 密钥，绝对禁止提交）
+.env
+.env.local
+.env.*.local
+
 # Python 环境与缓存
 __pycache__/
 .venv/

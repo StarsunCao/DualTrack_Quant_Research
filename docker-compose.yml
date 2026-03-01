@@ -1,0 +1,63 @@
+# DualTrack Quant Research - Docker Compose
+#
+# ⚠️ 重要警告: Docker for Mac 无法使用 Apple Silicon MPS 加速
+# 请在本地使用 uv 虚拟环境运行以获得最佳性能
+#
+version: '3.8'
+
+services:
+  # 主应用服务
+  dualtrack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dualtrack-quant
+    volumes:
+      # 挂载输出目录（持久化图表和缓存）
+      - ./docs/figures:/app/docs/figures
+      - ./docs/cache:/app/docs/cache
+      - ./docs/output:/app/docs/output
+    environment:
+      # LLM API 配置（可选）
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: python main.py --help
+
+  # Ollama 服务（本地 LLM 推理）
+  # 取消注释以下内容以使用本地 Ollama
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   # GPU 支持（需要 nvidia-docker）
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: 1
+  #   #           capabilities: [gpu]
+
+volumes:
+  ollama_data:
+
+# ============================================================
+# 使用说明 / Usage Instructions
+# ============================================================
+#
+# 启动服务 / Start Services:
+#   docker-compose up -d
+#
+# 运行回测 / Run Backtest:
+#   docker-compose run --rm dualtrack python main.py run --symbol CSI300
+#
+# 查看日志 / View Logs:
+#   docker-compose logs -f
+#
+# 停止服务 / Stop Services:
+#   docker-compose down
+#
+# ============================================================
