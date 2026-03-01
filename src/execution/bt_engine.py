@@ -169,6 +169,11 @@ class DualTrackStrategy(bt.Strategy):
         # 记录每日资产价值
         self.equity_curve: list[dict] = []
 
+        # 新增：详细交易记录
+        self.trade_records: list[dict] = []  # 交易记录
+        self.position_records: list[dict] = []  # 每日持仓记录
+        self.rebalance_records: list[dict] = []  # 调仓记录
+
     def log(self, txt: str, dt: Optional[datetime] = None) -> None:
         """打印日志。"""
         if self.params.printlog:
@@ -176,20 +181,34 @@ class DualTrackStrategy(bt.Strategy):
             print(f"  [{dt.isoformat()}] {txt}")
 
     def notify_order(self, order: bt.Order) -> None:
-        """订单状态通知。"""
+        """订单状态通知 - 增强版，记录详细交易信息。"""
         if order.status in [order.Submitted, order.Accepted]:
             return
 
         if order.status in [order.Completed]:
+            dt = self.datas[0].datetime.date(0)
+            record = {
+                "date": dt.isoformat(),
+                "type": "买入" if order.isbuy() else "卖出",
+                "price": order.executed.price,
+                "size": order.executed.size,
+                "value": order.executed.value,
+                "commission": order.executed.comm,
+                "symbol": self.datas[0]._name or "CSI300",
+            }
+            self.trade_records.append(record)
+
             if order.isbuy():
                 self.log(
                     f"买入执行: 价格={order.executed.price:.2f}, "
+                    f"数量={order.executed.size:.0f}, "
                     f"成本={order.executed.value:.2f}, "
                     f"手续费={order.executed.comm:.2f}"
                 )
             else:
                 self.log(
                     f"卖出执行: 价格={order.executed.price:.2f}, "
+                    f"数量={order.executed.size:.0f}, "
                     f"成本={order.executed.value:.2f}, "
                     f"手续费={order.executed.comm:.2f}"
                 )
@@ -210,16 +229,29 @@ class DualTrackStrategy(bt.Strategy):
         )
 
     def next(self) -> None:
-        """每个 bar 执行的逻辑。"""
-        # 记录当前资产价值
+        """每个 bar 执行的逻辑 - 增强版，记录持仓和调仓。"""
         current_date = self.datas[0].datetime.date(0)
         current_value = self.broker.getvalue()
 
+        # 记录每日资产价值
         self.equity_curve.append({
             "date": current_date,
             "value": current_value,
             "cash": self.broker.getcash(),
         })
+
+        # 记录每日持仓详情
+        pos = self.getposition(self.datas[0])
+        position_record = {
+            "date": current_date.isoformat(),
+            "symbol": self.datas[0]._name or "CSI300",
+            "position_size": pos.size if pos else 0,
+            "position_value": pos.size * self.dataclose[0] if pos else 0,
+            "cash": self.broker.getcash(),
+            "total_value": current_value,
+            "close_price": self.dataclose[0],
+        }
+        self.position_records.append(position_record)
 
         # 检查是否有未完成订单
         if self.order:
@@ -264,6 +296,24 @@ class DualTrackStrategy(bt.Strategy):
                 pass
 
         self.last_rebalance = current_date
+
+        # 记录调仓信息
+        for data in self.datas:
+            symbol = data._name if hasattr(data, '_name') else "default"
+            if symbol in target:
+                pos = self.getposition(data)
+                current_position_value = pos.size * data.close[0] if pos else 0
+                current_weight = current_position_value / current_value if current_value > 0 else 0
+
+                rebalance_record = {
+                    "date": current_date.isoformat(),
+                    "symbol": symbol,
+                    "target_weight": target[symbol],
+                    "current_weight": current_weight,
+                    "portfolio_value": current_value,
+                    "close_price": data.close[0],
+                }
+                self.rebalance_records.append(rebalance_record)
 
         # 执行调仓
         self.log(f"执行调仓, 目标仓位: {target}")
@@ -482,6 +532,19 @@ class BacktestEngine:
                 equity_curve["date"] = pd.to_datetime(equity_curve["date"])
                 equity_curve.set_index("date", inplace=True)
 
+        # 提取详细记录
+        trade_details = pd.DataFrame()
+        position_details = pd.DataFrame()
+        rebalance_details = pd.DataFrame()
+
+        if self._result is not None:
+            if hasattr(self._result, "trade_records"):
+                trade_details = pd.DataFrame(self._result.trade_records)
+            if hasattr(self._result, "position_records"):
+                position_details = pd.DataFrame(self._result.position_records)
+            if hasattr(self._result, "rebalance_records"):
+                rebalance_details = pd.DataFrame(self._result.rebalance_records)
+
         # 构建结果对象
         result = BacktestResult(
             initial_cash=self.initial_cash,
@@ -492,8 +555,14 @@ class BacktestEngine:
             max_drawdown=max_drawdown,
             max_drawdown_len=max_drawdown_len,
             equity_curve=equity_curve,
+            trades=trade_details,
             analyzers=analyzers,
         )
+
+        # 附加详细记录
+        result.trade_details = trade_details
+        result.position_details = position_details
+        result.rebalance_details = rebalance_details
 
         print(f"\n  回测耗时: {elapsed:.2f} 秒")
         print(result.summary())

@@ -4,9 +4,13 @@
 实现论文所需的各类图表，支持金融和工程指标的可视化对比。
 
 图表类型：
-1. 资金曲线对比图：ML纯净版、LLM纯净版、双轨融合版
+1. 资金曲线对比图：ML Track vs LLM Track 对比
 2. 最大回撤热力图：各模型回撤分布
 3. 延迟分布箱线图：推理延迟对比
+
+注意：
+- 本项目是对比框架，核心是比较 ML 和 LLM 两个独立轨道
+- 融合曲线（如果有）仅作为可选探索，用虚线表示
 """
 
 import os
@@ -76,10 +80,13 @@ def plot_equity_curves(
     color_map = {
         "ML_Baseline": COLORS["ml"],
         "ML": COLORS["ml"],
+        "ML_Track": COLORS["ml"],
         "LLM_Baseline": COLORS["llm"],
         "LLM": COLORS["llm"],
+        "LLM_Track": COLORS["llm"],
         "DualTrack_Fusion": COLORS["fusion"],
         "Fusion": COLORS["fusion"],
+        "Fused_Track": COLORS["fusion"],
     }
 
     # 绘制各策略净值曲线
@@ -94,13 +101,19 @@ def plot_equity_curves(
 
         color = color_map.get(name, None)
 
+        # 判断是否为融合轨道（可选探索）
+        is_fusion = "Fusion" in name or "Fused" in name
+
         # 绘制净值曲线
+        # ML/LLM Track 用实线，融合轨道用虚线（可选探索）
         ax1.plot(
             nav.index,
             nav.values,
-            label=name,
-            linewidth=2,
+            label=name + (" (Exploratory)" if is_fusion else ""),
+            linewidth=2 if not is_fusion else 1.5,
+            linestyle="-" if not is_fusion else "--",
             color=color,
+            alpha=1.0 if not is_fusion else 0.7,
         )
 
         # 绘制回撤阴影
