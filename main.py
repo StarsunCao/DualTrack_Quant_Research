@@ -44,6 +44,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+# 导入日志模块
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 # ============================================================================
 # CLI 主入口
@@ -736,7 +741,8 @@ def evaluate(
 @click.option("--end", default="2026-02-28", help="结束日期")
 @click.option("--news-file", default="data/raw/real_csi300_news_3m.csv", help="新闻数据文件路径")
 @click.option("--output-dir", default="docs/cache/llm_responses", help="缓存输出目录")
-@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "mock"]), help="LLM 执行器类型")
+@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "mock"]), help="LLM 执行器类型")
+@click.option("--model", default=None, help="LLM 模型名称（可选）")
 @click.pass_context
 def cache_build(
     ctx: click.Context,
@@ -746,6 +752,7 @@ def cache_build(
     news_file: str,
     output_dir: str,
     executor: str,
+    model: Optional[str],
 ) -> None:
     """
     构建 LLM 响应离线缓存（支持断点续传）。
@@ -757,28 +764,29 @@ def cache_build(
     """
     verbose = ctx.obj.get("verbose", False)
 
-    click.echo("=" * 70)
-    click.echo("  LLM 离线缓存构建")
-    click.echo("=" * 70)
-    click.echo(f"  标的: {symbol}")
-    click.echo(f"  日期范围: {start} ~ {end}")
-    click.echo(f"  新闻文件: {news_file}")
-    click.echo(f"  执行器: {executor}")
-    click.echo(f"  输出目录: {output_dir}")
+    logger.info("=" * 60)
+    logger.info("  LLM 离线缓存构建")
+    logger.info("=" * 60)
+    logger.info(f"标的: {symbol}")
+    logger.info(f"日期范围: {start} ~ {end}")
+    logger.info(f"新闻文件: {news_file}")
+    logger.info(f"执行器: {executor}")
+    logger.info(f"输出目录: {output_dir}")
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    cache_file = output_path / f"llm_cache_{symbol}.jsonl"
+    cache_file = output_path / f"llm_cache_{symbol}_{executor}.jsonl"
 
     try:
         from src.models.llm_track.agent import LLMTradingAgent
+        from src.data.data_aligner import DataAligner
 
         # 加载新闻数据
         news_path = Path(news_file)
         if news_path.exists():
             news_data = pd.read_csv(news_path, parse_dates=["timestamp"])
-            click.echo(f"  ✅ 加载新闻: {len(news_data)} 条")
+            logger.info(f"加载新闻: {len(news_data)} 条")
 
             # 过滤时间范围
             start_dt = pd.to_datetime(start)
@@ -786,28 +794,68 @@ def cache_build(
             news_data = news_data[
                 (news_data["timestamp"] >= start_dt) & (news_data["timestamp"] <= end_dt)
             ]
-            click.echo(f"  ✅ 时间范围过滤后: {len(news_data)} 条")
+            logger.info(f"时间范围过滤后: {len(news_data)} 条")
         else:
-            click.echo(f"  ⚠️ 文件不存在: {news_file}")
+            logger.error(f"文件不存在: {news_file}")
             return
 
+        # 加载OHLCV数据（用于交易日过滤和市场背景）
+        ohlcv_path = Path(f"data/raw/real_{symbol.lower()}_5y.csv")
+        if ohlcv_path.exists():
+            ohlcv_data = pd.read_csv(ohlcv_path, parse_dates=["date"])
+            ohlcv_data.set_index("date", inplace=True)
+            logger.info(f"加载OHLCV数据: {len(ohlcv_data)} 条")
+        else:
+            logger.warning(f"OHLCV数据文件不存在: {ohlcv_path}")
+            ohlcv_data = None
+
+        # 数据聚合：将多源新闻聚合为每日决策
+        logger.info("数据聚合: 将多源新闻聚合为每日决策...")
+        daily_news = DataAligner.aggregate_daily_news(
+            news_data,
+            max_news_per_day=20,
+            max_content_length=150,
+            source_col="source" if "source" in news_data.columns else None,
+            filter_notices=True  # 智能筛选重要公告
+        )
+        logger.info(f"聚合完成: {len(news_data)} 条 → {len(daily_news)} 天")
+
+        # 交易日过滤
+        if ohlcv_data is not None:
+            trading_days = set(ohlcv_data.index.normalize())
+            daily_news = daily_news[
+                daily_news["timestamp"].dt.normalize().isin(trading_days)
+            ]
+            logger.info(f"交易日过滤后: {len(daily_news)} 天")
+
+        # 确定模型
+        if model is None:
+            if executor == "siliconflow":
+                model = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+            elif executor == "deepseek":
+                model = "deepseek-chat"
+            else:
+                model = "qwen2.5:7b"
+
+        logger.info(f"使用模型: {model}")
+
         # 初始化 LLM Agent
-        llm_agent = LLMTradingAgent(executor_type=executor)
+        llm_agent = LLMTradingAgent(executor_type=executor, model=model)
 
         # 检查已有缓存（断点续传）
         if cache_file.exists():
             llm_agent._load_cache(cache_file)
-            click.echo(f"  ✅ 已加载 {len(llm_agent._cache)} 条缓存，将跳过已处理的新闻")
+            logger.info(f"已加载 {len(llm_agent._cache)} 条缓存，将跳过已处理的日期")
 
         # 转换为新闻列表格式
-        news_list = news_data.to_dict("records")
+        news_list = daily_news.to_dict("records")
 
         if not news_list:
-            click.echo("  ⚠️ 无新闻数据需要处理")
+            logger.warning("无新闻数据需要处理")
             return
 
         # 批量推理（支持断点续传）
-        click.echo("\n  执行批量推理...")
+        logger.info("执行批量推理...")
 
         start_time = time.time()
         signals = llm_agent.batch_analyze(
@@ -818,21 +866,21 @@ def cache_build(
         )
         elapsed = time.time() - start_time
 
-        click.echo(f"\n  ✅ 缓存构建完成:")
-        click.echo(f"  总新闻数: {len(news_data)}")
-        click.echo(f"  已处理: {len(signals)}")
-        click.echo(f"  总耗时: {elapsed:.2f} 秒")
-        click.echo(f"  缓存文件: {cache_file}")
-        click.echo(f"  文件大小: {cache_file.stat().st_size:,} bytes")
+        logger.info("缓存构建完成:")
+        logger.info(f"  总新闻数: {len(news_data)}")
+        logger.info(f"  已处理: {len(signals)}")
+        logger.info(f"  总耗时: {elapsed:.2f} 秒")
+        logger.info(f"  缓存文件: {cache_file}")
+        logger.info(f"  文件大小: {cache_file.stat().st_size:,} bytes")
 
         # 计算加速比
         if len(signals) > 0:
             avg_latency = signals["latency_ms"].mean()
-            click.echo(f"  平均延迟: {avg_latency:.1f}ms")
-            click.echo(f"  预计加速比: ~{avg_latency / 0.1:.0f}x (缓存读取 ~0.1ms)")
+            logger.info(f"平均延迟: {avg_latency:.1f}ms")
+            logger.info(f"预计加速比: ~{avg_latency / 0.1:.0f}x (缓存读取 ~0.1ms)")
 
     except Exception as e:
-        click.echo(f"  ❌ 缓存构建失败: {e}")
+        logger.error(f"缓存构建失败: {e}")
         if verbose:
             import traceback
             traceback.print_exc()
