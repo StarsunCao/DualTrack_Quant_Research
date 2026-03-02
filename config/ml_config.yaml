@@ -1,0 +1,79 @@
+# 机器学习模型配置文件
+# 配置 ML Track 的模型参数
+
+# Logistic Regression 配置
+logistic_regression:
+  name: "LogisticRegression"
+  params:
+    C: 1.0
+    max_iter: 1000
+    random_state: 42
+  training:
+    test_size: 0.2
+    use_standardScaler: true
+
+# LSTM 配置
+lstm:
+  name: "LSTM"
+  architecture:
+    input_dim: null  # 自动根据特征数确定
+    hidden_dim: 64
+    num_layers: 2
+    dropout: 0.2
+  training:
+    learning_rate: 0.001
+    batch_size: 32
+    epochs: 50
+    sequence_length: 20
+    test_size: 0.2
+    early_stopping:
+      enabled: true
+      patience: 10
+      min_delta: 0.001
+  device: "auto"  # auto/mps/cuda/cpu
+
+# LightGBM 配置
+lightgbm:
+  name: "LightGBM"
+  params:
+    n_estimators: 100
+    max_depth: 6
+    learning_rate: 0.1
+    random_state: 42
+    verbose: -1
+    n_jobs: -1
+  training:
+    test_size: 0.2
+
+# 特征工程配置
+feature_engineering:
+  # 技术指标
+  technical_indicators:
+    - "sma"
+    - "ema"
+    - "rsi"
+    - "macd"
+    - "bollinger"
+    - "atr"
+    - "obv"
+    - "adx"
+    - "stochastic"
+    - "momentum"
+
+  # 窗口期配置
+  windows:
+    short: 5
+    medium: 20
+    long: 60
+
+  # 目标变量配置
+  target:
+    forward_period: 1  # 预测未来几天
+    threshold: 0.0     # 涨跌阈值
+
+# 模型管理配置
+model_management:
+  models_dir: "models"
+  auto_save: true
+  versioning: true
+  keep_versions: 5  # 保留最近的版本数

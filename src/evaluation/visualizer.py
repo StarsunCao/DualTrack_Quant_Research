@@ -592,6 +592,322 @@ def plot_rolling_sharpe(
 
 
 # ============================================================================
+# 新增：信号相关性矩阵图
+# ============================================================================
+def plot_signal_correlation(
+    signals_df: pd.DataFrame,
+    title: str = "Signal Correlation Matrix",
+    figsize: Tuple[int, int] = (10, 8),
+    save_path: Optional[str] = None,
+) -> Figure:
+    """
+    绘制信号相关性矩阵热力图。
+
+    Args:
+        signals_df: 信号数据 DataFrame，各列为不同策略的信号。
+        title: 图表标题。
+        figsize: 图表尺寸。
+        save_path: 保存路径。
+
+    Returns:
+        matplotlib Figure 对象。
+    """
+    # 计算相关性矩阵
+    corr_matrix = signals_df.corr()
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # 绘制热力图
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))  # 只显示下三角
+    sns.heatmap(
+        corr_matrix,
+        mask=mask,
+        annot=True,
+        fmt=".2f",
+        cmap="RdBu_r",
+        center=0,
+        vmin=-1,
+        vmax=1,
+        square=True,
+        linewidths=0.5,
+        cbar_kws={"label": "Correlation"},
+        ax=ax,
+    )
+
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=15)
+
+    plt.tight_layout()
+
+    if save_path:
+        _save_figure(fig, save_path)
+
+    return fig
+
+
+# ============================================================================
+# 新增：权重变化时序图
+# ============================================================================
+def plot_weight_timeseries(
+    weights_df: pd.DataFrame,
+    title: str = "Portfolio Weight Evolution",
+    figsize: Tuple[int, int] = (12, 6),
+    save_path: Optional[str] = None,
+) -> Figure:
+    """
+    绘制仓位权重变化时序图。
+
+    Args:
+        weights_df: 权重数据 DataFrame，索引为时间，各列为不同资产/策略的权重。
+        title: 图表标题。
+        figsize: 图表尺寸。
+        save_path: 保存路径。
+
+    Returns:
+        matplotlib Figure 对象。
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # 绘制堆叠面积图
+    colors = sns.color_palette("husl", n_colors=len(weights_df.columns))
+
+    ax.stackplot(
+        weights_df.index,
+        *[weights_df[col] for col in weights_df.columns],
+        labels=weights_df.columns,
+        colors=colors,
+        alpha=0.8,
+    )
+
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=10)
+    ax.set_ylabel("Weight", fontsize=12)
+    ax.set_xlabel("Date", fontsize=12)
+    ax.legend(loc="upper left", framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0%}"))
+
+    plt.tight_layout()
+
+    if save_path:
+        _save_figure(fig, save_path)
+
+    return fig
+
+
+# ============================================================================
+# 新增：市场状态切换可视化
+# ============================================================================
+def plot_market_state_transitions(
+    states_series: pd.Series,
+    equity_curve: Optional[pd.Series] = None,
+    title: str = "Market State Transitions",
+    figsize: Tuple[int, int] = (14, 6),
+    save_path: Optional[str] = None,
+) -> Figure:
+    """
+    绘制市场状态切换可视化图。
+
+    Args:
+        states_series: 市场状态序列，值为状态名称。
+        equity_curve: 可选的净值曲线，用于叠加显示。
+        title: 图表标题。
+        figsize: 图表尺寸。
+        save_path: 保存路径。
+
+    Returns:
+        matplotlib Figure 对象。
+    """
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1,
+        figsize=figsize,
+        gridspec_kw={"height_ratios": [3, 1]},
+        sharex=True,
+    )
+
+    # 定义状态颜色
+    state_colors = {
+        "normal": "#2E86AB",
+        "high_volatility": "#F18F01",
+        "black_swan": "#C73E1D",
+    }
+
+    # 如果提供了净值曲线，绘制在上面
+    if equity_curve is not None:
+        ax1.plot(equity_curve.index, equity_curve.values, color="gray", linewidth=1.5, alpha=0.7)
+        ax1.set_ylabel("NAV", fontsize=12)
+        ax1.set_title(title, fontsize=14, fontweight="bold", pad=10)
+        ax1.grid(True, alpha=0.3)
+
+    # 绘制状态条
+    unique_states = states_series.unique()
+    y_pos = {state: i for i, state in enumerate(unique_states)}
+
+    for i in range(len(states_series) - 1):
+        state = states_series.iloc[i]
+        start_date = states_series.index[i]
+        end_date = states_series.index[i + 1]
+
+        ax2.barh(
+            y_pos[state],
+            (end_date - start_date).days,
+            left=start_date,
+            color=state_colors.get(state, "gray"),
+            alpha=0.8,
+            height=0.6,
+        )
+
+    ax2.set_yticks(list(y_pos.values()))
+    ax2.set_yticklabels(list(y_pos.keys()))
+    ax2.set_xlabel("Date", fontsize=12)
+    ax2.set_ylabel("Market State", fontsize=12)
+
+    # 添加图例
+    handles = [plt.Rectangle((0,0),1,1, color=state_colors.get(s, "gray")) for s in unique_states]
+    ax2.legend(handles, unique_states, loc="upper right")
+
+    plt.tight_layout()
+
+    if save_path:
+        _save_figure(fig, save_path)
+
+    return fig
+
+
+# ============================================================================
+# 新增：ROC曲线对比
+# ============================================================================
+def plot_roc_comparison(
+    y_true: np.ndarray,
+    y_scores: Dict[str, np.ndarray],
+    title: str = "ROC Curve Comparison",
+    figsize: Tuple[int, int] = (10, 8),
+    save_path: Optional[str] = None,
+) -> Figure:
+    """
+    绘制多模型 ROC 曲线对比图。
+
+    Args:
+        y_true: 真实标签。
+        y_scores: 各模型的预测分数字典，格式为 {模型名: 分数数组}。
+        title: 图表标题。
+        figsize: 图表尺寸。
+        save_path: 保存路径。
+
+    Returns:
+        matplotlib Figure 对象。
+    """
+    from sklearn.metrics import roc_curve, auc
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    colors = sns.color_palette("husl", n_colors=len(y_scores))
+
+    for i, (name, scores) in enumerate(y_scores.items()):
+        fpr, tpr, _ = roc_curve(y_true, scores)
+        roc_auc = auc(fpr, tpr)
+
+        ax.plot(
+            fpr,
+            tpr,
+            linewidth=2,
+            label=f"{name} (AUC = {roc_auc:.3f})",
+            color=colors[i],
+        )
+
+    # 绘制对角线
+    ax.plot([0, 1], [0, 1], "k--", linewidth=1, alpha=0.5, label="Random Classifier")
+
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel("False Positive Rate", fontsize=12)
+    ax.set_ylabel("True Positive Rate", fontsize=12)
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=10)
+    ax.legend(loc="lower right", framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if save_path:
+        _save_figure(fig, save_path)
+
+    return fig
+
+
+# ============================================================================
+# 新增：年化收益-风险散点图
+# ============================================================================
+def plot_return_risk_scatter(
+    returns_data: pd.DataFrame,
+    title: str = "Annualized Return vs Risk",
+    figsize: Tuple[int, int] = (10, 8),
+    save_path: Optional[str] = None,
+) -> Figure:
+    """
+    绘制年化收益-风险散点图。
+
+    Args:
+        returns_data: 收益风险数据 DataFrame，需包含 'annual_return', 'volatility', 'sharpe_ratio' 列。
+        title: 图表标题。
+        figsize: 图表尺寸。
+        save_path: 保存路径。
+
+    Returns:
+        matplotlib Figure 对象。
+    """
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # 计算夏普比率用于颜色映射
+    colors = returns_data.get('sharpe_ratio', returns_data['annual_return'] / returns_data['volatility'])
+
+    # 绘制散点
+    scatter = ax.scatter(
+        returns_data['volatility'] * 100,
+        returns_data['annual_return'] * 100,
+        c=colors,
+        s=200,
+        cmap='RdYlGn',
+        alpha=0.7,
+        edgecolors='black',
+        linewidths=1,
+    )
+
+    # 添加策略标签
+    for idx, row in returns_data.iterrows():
+        ax.annotate(
+            idx,
+            (row['volatility'] * 100, row['annual_return'] * 100),
+            xytext=(5, 5),
+            textcoords='offset points',
+            fontsize=10,
+            fontweight='bold',
+        )
+
+    # 添加夏普比率等高线
+    x_range = np.linspace(0, returns_data['volatility'].max() * 120, 100)
+    y_range = np.linspace(0, returns_data['annual_return'].max() * 120, 100)
+    X, Y = np.meshgrid(x_range, y_range)
+    Z = Y / X  # 夏普比率等高线
+
+    contour = ax.contour(X, Y, Z, levels=5, colors='gray', alpha=0.5, linestyles='--')
+    ax.clabel(contour, inline=True, fontsize=8)
+
+    ax.set_xlabel("Annualized Volatility (%)", fontsize=12)
+    ax.set_ylabel("Annualized Return (%)", fontsize=12)
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=10)
+    ax.grid(True, alpha=0.3)
+
+    # 添加颜色条
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label("Sharpe Ratio", fontsize=11)
+
+    plt.tight_layout()
+
+    if save_path:
+        _save_figure(fig, save_path)
+
+    return fig
+
+
+# ============================================================================
 # 辅助函数
 # ============================================================================
 def _save_figure(fig: Figure, path: str) -> None:
@@ -674,6 +990,54 @@ def generate_all_figures(
             save_path=output_dir / f"{prefix}metrics_comparison.png",
         )
         figures["metrics_comparison"] = fig
+
+    # 5. 信号相关性矩阵
+    if "signal_correlation" in results:
+        fig = plot_signal_correlation(
+            results["signal_correlation"],
+            title="Signal Correlation Matrix",
+            save_path=output_dir / f"{prefix}signal_correlation.png",
+        )
+        figures["signal_correlation"] = fig
+
+    # 6. 权重变化时序图
+    if "weight_timeseries" in results:
+        fig = plot_weight_timeseries(
+            results["weight_timeseries"],
+            title="Portfolio Weight Evolution",
+            save_path=output_dir / f"{prefix}weight_timeseries.png",
+        )
+        figures["weight_timeseries"] = fig
+
+    # 7. 市场状态切换图
+    if "market_states" in results:
+        fig = plot_market_state_transitions(
+            results["market_states"],
+            equity_curve=results.get("benchmark_equity"),
+            title="Market State Transitions",
+            save_path=output_dir / f"{prefix}market_states.png",
+        )
+        figures["market_states"] = fig
+
+    # 8. ROC曲线对比
+    if "roc_data" in results:
+        roc_data = results["roc_data"]
+        fig = plot_roc_comparison(
+            roc_data["y_true"],
+            roc_data["y_scores"],
+            title="ROC Curve Comparison",
+            save_path=output_dir / f"{prefix}roc_comparison.png",
+        )
+        figures["roc_comparison"] = fig
+
+    # 9. 收益-风险散点图
+    if "return_risk" in results:
+        fig = plot_return_risk_scatter(
+            results["return_risk"],
+            title="Annualized Return vs Risk",
+            save_path=output_dir / f"{prefix}return_risk.png",
+        )
+        figures["return_risk"] = fig
 
     return figures
 

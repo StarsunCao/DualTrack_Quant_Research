@@ -1,0 +1,95 @@
+# LLM 配置文件
+# 配置 LLM Track 的模型参数
+
+# 执行器配置
+executors:
+  ollama:
+    name: "Ollama"
+    type: "local"
+    model: "qwen2.5:7b"
+    base_url: "http://localhost:11434"
+    timeout: 120
+    temperature: 0.7
+    max_tokens: 1024
+
+  deepseek:
+    name: "DeepSeek"
+    type: "cloud"
+    model: "deepseek-chat"
+    base_url: "https://api.deepseek.com/v1"
+    timeout: 60
+    temperature: 0.7
+    max_tokens: 1024
+    # API Key 从环境变量读取: DEEPSEEK_API_KEY
+
+  siliconflow:
+    name: "SiliconFlow"
+    type: "cloud"
+    model: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+    base_url: "https://api.siliconflow.cn/v1"
+    timeout: 120
+    temperature: 0.7
+    max_tokens: 2048
+    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+
+  mock:
+    name: "Mock"
+    type: "mock"
+    model: "mock-model"
+    default_signal: "hold"
+    latency_ms: 10
+
+# 提示词配置
+prompts:
+  # Chain-of-Thought 提示模板
+  cot_template: |
+    你是一位资深的量化交易分析师。请基于以下信息做出交易决策。
+
+    ## 市场背景
+    {market_context}
+
+    ## 新闻资讯
+    {news_text}
+
+    请按照以下步骤进行分析：
+    1. 数据概览：总结关键信息
+    2. 技术分析：识别趋势和支撑/阻力位
+    3. 情绪评估：分析市场情绪
+    4. 风险识别：指出潜在风险
+    5. 决策输出：给出明确的交易信号
+
+    请以 JSON 格式输出：
+    {{
+      "signal": "buy|sell|hold",
+      "confidence": 0.0-1.0,
+      "reasoning": "详细的推理过程"
+    }}
+
+  # 信号映射
+  signal_mapping:
+    buy: ["买入", "看涨", "做多", "buy", "long"]
+    sell: ["卖出", "看跌", "做空", "sell", "short"]
+    hold: ["持有", "观望", "中性", "hold", "neutral"]
+
+# 缓存配置
+cache:
+  enabled: true
+  cache_dir: "docs/cache/llm_responses"
+  cache_format: "jsonl"
+  auto_save: true
+  load_on_init: true
+
+# 批量处理配置
+batch_processing:
+  max_workers: 4
+  use_parallel: true
+  batch_size: 100
+  retry_attempts: 3
+  retry_delay: 1.0
+
+# 容错配置
+fault_tolerance:
+  default_signal: "hold"
+  default_confidence: 0.5
+  truncate_on_parse_error: true
+  log_errors: true

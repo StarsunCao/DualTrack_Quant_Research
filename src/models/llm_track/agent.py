@@ -6,6 +6,7 @@ LLM 交易代理模块。
 """
 
 import json
+import os
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,8 +17,12 @@ from typing import Any, Optional, Union
 
 import pandas as pd
 import requests
+from tqdm import tqdm
 
+from src.utils.logger import get_logger
 from .prompts import SentimentPromptBuilder, TradingDecisionParser
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -635,6 +640,18 @@ class LLMTradingAgent:
                 timeout=timeout,
                 temperature=temperature,
             )
+        elif executor_type == "siliconflow":
+            # SiliconFlow 使用 OpenAI 兼容格式，与 DeepSeek 相同
+            # API Key 从 SILICONFLOW_API_KEY 环境变量读取
+            if api_key is None:
+                api_key = os.environ.get("SILICONFLOW_API_KEY", "")
+            return DeepSeekExecutor(
+                model=model or "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+                api_key=api_key,
+                base_url=base_url or "https://api.siliconflow.cn/v1",
+                timeout=timeout,
+                temperature=temperature,
+            )
         elif executor_type == "mock":
             return MockExecutor(model=model or "mock-model")
         else:
@@ -659,8 +676,12 @@ class LLMTradingAgent:
         Returns:
             LLMResponse 对象。
         """
-        # 构建缓存键
-        cache_key = f"{symbol}_{hash(news_text)}"
+        # 构建缓存键（优先使用时间戳，更稳定）
+        if timestamp is not None:
+            ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+            cache_key = f"{symbol}_{ts_str}"
+        else:
+            cache_key = f"{symbol}_{hash(news_text)}"
 
         # 检查内存缓存
         if self.use_cache and cache_key in self._cache:
@@ -747,7 +768,15 @@ class LLMTradingAgent:
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp)
 
-            news_text = news.get("text", news.get("content", ""))
+            # 支持聚合新闻格式（每日多条新闻合并）
+            # 使用包含完整内容的聚合内容（aggregated_content包含标题+内容）
+            news_text = news.get(
+                "aggregated_content",  # 完整聚合内容（标题+内容）
+                news.get(
+                    "structured_summary",  # 备用：结构化的分类摘要（仅标题）
+                    news.get("text", news.get("content", ""))
+                )
+            )
 
             response = self.analyze(
                 news_text=news_text,
@@ -756,7 +785,7 @@ class LLMTradingAgent:
                 timestamp=timestamp,
             )
 
-            return {
+            result = {
                 "timestamp": timestamp,
                 "symbol": symbol,
                 "llm_signal": response.signal,
@@ -767,22 +796,40 @@ class LLMTradingAgent:
                 "parse_success": response.parse_success,
             }
 
-        # 执行批量处理
+            # 实时追加保存（支持断点续传）
+            if cache_path:
+                self._append_to_cache(cache_path, result, news_text=news_text, market_context=market_context)
+
+            return result
+
+        # 执行批量处理（带进度条）
+        logger.info(f"开始批量分析 {len(news_list)} 条新闻...")
+
+        # 添加速率限制参数（避免API超时）
+        request_delay = 2.0  # 每次请求间隔2秒，避免速率限制
+
         if use_parallel and len(news_list) > 1:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 并行模式：减少并发数并添加延迟
+            with ThreadPoolExecutor(max_workers=min(max_workers, 2)) as executor:  # 限制最多2个并发
                 futures = {executor.submit(process_news, news): news for news in news_list}
+                progress_bar = tqdm(total=len(news_list), desc="LLM Batch Analysis", unit="news")
                 for future in as_completed(futures):
                     results.append(future.result())
+                    progress_bar.update(1)
+                    time.sleep(request_delay)  # 每次请求后延迟
+                progress_bar.close()
         else:
-            for news in news_list:
+            # 串行模式：添加请求间隔
+            for news in tqdm(news_list, desc="LLM Analysis", unit="news"):
                 results.append(process_news(news))
+                time.sleep(request_delay)  # 每次请求后延迟
 
         # 排序结果（按时间戳）
         results.sort(key=lambda x: x["timestamp"] if x["timestamp"] else datetime.min)
 
-        # 保存缓存
-        if cache_path:
-            self._save_cache(cache_path, results)
+        # 保存缓存（现在不需要了，因为已实时保存，但保留以防兼容性问题）
+        if cache_path and len(results) > 0:
+            logger.info(f"缓存已实时保存到: {cache_path}")
 
         # 创建 DataFrame
         df = pd.DataFrame(results)
@@ -804,7 +851,15 @@ class LLMTradingAgent:
                     if line.strip():
                         try:
                             entry = json.loads(line)
-                            cache_key = f"{entry['symbol']}_{hash(entry['news_text'])}"
+                            # 使用时间戳作为缓存键（更稳定）
+                            ts = entry.get("timestamp", "")
+                            symbol = entry.get("symbol", "UNKNOWN")
+                            if ts:
+                                cache_key = f"{symbol}_{ts}"
+                            else:
+                                # 兼容旧缓存格式
+                                cache_key = f"{symbol}_{hash(entry.get('news_text', ''))}"
+
                             self._cache[cache_key] = CacheEntry(**entry)
                             loaded_count += 1
                         except json.JSONDecodeError as e:
@@ -844,9 +899,57 @@ class LLMTradingAgent:
                 finally:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-            print(f"已保存 {len(self._cache)} 条缓存到 {cache_path}")
+            logger.info(f"已保存 {len(self._cache)} 条缓存到 {cache_path}")
         except Exception as e:
-            print(f"保存缓存失败: {e}")
+            logger.error(f"保存缓存失败: {e}")
+
+    def _append_to_cache(self, cache_path: Path, entry: dict, news_text: str = "", market_context: str = "") -> None:
+        """
+        追加单条记录到缓存文件（实时保存，支持断点续传）。
+
+        Args:
+            cache_path: 缓存文件路径。
+            entry: 要追加的缓存条目（来自 process_news 的结果字典）。
+            news_text: 新闻原文（用于构建完整 CacheEntry）。
+            market_context: 市场背景（用于构建完整 CacheEntry）。
+        """
+        try:
+            # 确保目录存在
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+            import fcntl
+
+            # 处理 timestamp 格式（支持 pandas Timestamp 和 datetime）
+            ts = entry.get("timestamp", "")
+            if hasattr(ts, 'isoformat'):
+                # pandas Timestamp 或 datetime 对象
+                ts = ts.isoformat()
+            elif ts is None:
+                ts = ""
+
+            # 将 entry 转换为 CacheEntry 格式
+            # entry 格式: {timestamp, symbol, llm_signal, reasoning, latency_ms, confidence, model, parse_success}
+            cache_entry = CacheEntry(
+                timestamp=ts,
+                symbol=entry.get("symbol", "UNKNOWN"),
+                news_text=news_text,
+                market_context=market_context,
+                signal=entry.get("llm_signal", "hold"),
+                confidence=entry.get("confidence", 0.0),
+                reasoning=entry.get("reasoning", ""),
+                latency_ms=entry.get("latency_ms", 0.0),
+                model=entry.get("model", "unknown"),
+            )
+
+            # 追加模式写入
+            with open(cache_path, "a", encoding="utf-8") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    f.write(cache_entry.to_jsonl() + "\n")
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except Exception as e:
+            logger.warning(f"追加缓存失败: {e}")
 
     def health_check(self) -> dict:
         """

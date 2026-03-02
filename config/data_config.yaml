@@ -1,0 +1,61 @@
+# 数据源配置文件
+# 用于配置市场数据和新闻数据的来源
+
+# 市场数据配置
+market_data:
+  # 默认数据时间范围
+  default_start_date: "2020-01-01"
+  default_end_date: "2024-12-31"
+
+  # 数据源配置
+  sources:
+    CSI300:
+      name: "沪深300指数"
+      provider: "akshare"
+      symbol: "000300"
+      exchange: "SH"
+      timezone: "Asia/Shanghai"
+
+    QQQ:
+      name: "纳斯达克100指数"
+      provider: "yfinance"
+      symbol: "QQQ"
+      timezone: "America/New_York"
+
+  # 数据质量检查配置
+  quality_check:
+    check_missing_values: true
+    check_time_continuity: true
+    check_price_reasonableness: true
+    max_missing_pct: 5.0  # 最大允许缺失百分比
+    min_completeness_rate: 95.0  # 最小完整率
+
+  # 存储配置
+  storage:
+    raw_data_dir: "data/raw"
+    processed_data_dir: "data/processed"
+    cache_dir: "data/cache"
+
+# 新闻数据配置
+news_data:
+  # 数据源
+  sources:
+    - "mock"  # 目前只支持模拟数据
+    # - "akshare_news"  # 未来支持
+    # - "bloomberg"     # 未来支持
+
+  # 模拟数据配置
+  mock_config:
+    avg_news_per_day: 3
+    sentiment_distribution:
+      positive: 0.3
+      negative: 0.3
+      neutral: 0.4
+
+  # 新闻分类
+  categories:
+    - "宏观经济"
+    - "行业政策"
+    - "公司公告"
+    - "市场情绪"
+    - "国际市场"

@@ -47,6 +47,12 @@ class BacktestResult:
         equity_curve: 资产净值曲线 (DataFrame)。
         trades: 交易记录 (DataFrame)。
         analyzers: 分析器结果字典。
+        trade_details: 详细交易记录 (DataFrame)。
+        position_details: 持仓记录 (DataFrame)。
+        rebalance_details: 调仓记录 (DataFrame)。
+        config: 实验配置字典。
+        git_commit_hash: Git commit hash 用于复现。
+        timestamp: 结果保存时间戳。
     """
     initial_cash: float
     final_value: float
@@ -58,6 +64,27 @@ class BacktestResult:
     equity_curve: pd.DataFrame = field(default_factory=pd.DataFrame)
     trades: pd.DataFrame = field(default_factory=pd.DataFrame)
     analyzers: dict = field(default_factory=dict)
+    trade_details: pd.DataFrame = field(default_factory=pd.DataFrame)
+    position_details: pd.DataFrame = field(default_factory=pd.DataFrame)
+    rebalance_details: pd.DataFrame = field(default_factory=pd.DataFrame)
+    config: dict = field(default_factory=dict)
+    git_commit_hash: str = field(default_factory=lambda: BacktestResult._get_git_commit())
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    @staticmethod
+    def _get_git_commit() -> str:
+        """获取当前 Git commit hash。"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return "unknown"
 
     def to_dict(self) -> dict:
         """转换为字典格式。"""
@@ -69,6 +96,9 @@ class BacktestResult:
             "sharpe_ratio": self.sharpe_ratio,
             "max_drawdown": self.max_drawdown,
             "max_drawdown_len": self.max_drawdown_len,
+            "config": self.config,
+            "git_commit_hash": self.git_commit_hash,
+            "timestamp": self.timestamp,
         }
 
     def summary(self) -> str:
@@ -88,6 +118,155 @@ class BacktestResult:
             "=" * 60,
         ]
         return "\n".join(lines)
+
+    def save(self, path: Union[str, Path]) -> Path:
+        """
+        保存回测结果到文件。
+
+        保存内容包括：
+        - 回测指标（JSON格式）
+        - 资产净值曲线（Parquet格式）
+        - 交易记录（Parquet格式）
+        - 持仓记录（Parquet格式）
+        - 调仓记录（Parquet格式）
+        - 完整结果（Pickle格式，用于完整恢复）
+
+        Args:
+            path: 保存路径前缀或目录
+
+        Returns:
+            保存的目录路径
+        """
+        save_path = Path(path)
+        if save_path.suffix:  # 如果有后缀，视为文件路径，取其目录
+            save_path = save_path.parent / save_path.stem
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        # 1. 保存回测指标和元数据（JSON）
+        with open(save_path / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+
+        # 2. 保存资产净值曲线（Parquet格式，带索引）
+        if not self.equity_curve.empty:
+            self.equity_curve.to_parquet(save_path / "equity_curve.parquet")
+
+        # 3. 保存交易记录
+        if not self.trade_details.empty:
+            self.trade_details.to_parquet(save_path / "trade_details.parquet")
+        if not self.trades.empty:
+            self.trades.to_parquet(save_path / "trades.parquet")
+
+        # 4. 保存持仓记录
+        if not self.position_details.empty:
+            self.position_details.to_parquet(save_path / "position_details.parquet")
+
+        # 5. 保存调仓记录
+        if not self.rebalance_details.empty:
+            self.rebalance_details.to_parquet(save_path / "rebalance_details.parquet")
+
+        # 6. 保存分析器结果（JSON）
+        # 需要将分析器结果转换为可序列化的格式
+        serializable_analyzers = {}
+        for key, value in self.analyzers.items():
+            if isinstance(value, dict):
+                serializable_analyzers[key] = value
+            else:
+                # 尝试转换为字典
+                try:
+                    serializable_analyzers[key] = dict(value)
+                except (TypeError, ValueError):
+                    serializable_analyzers[key] = str(value)
+
+        with open(save_path / "analyzers.json", "w", encoding="utf-8") as f:
+            json.dump(serializable_analyzers, f, indent=2, ensure_ascii=False, default=str)
+
+        # 7. 保存完整结果（Pickle格式，用于完整恢复）
+        import pickle
+        with open(save_path / "result.pkl", "wb") as f:
+            pickle.dump(self, f)
+
+        print(f"回测结果已保存到: {save_path}")
+        return save_path
+
+    @classmethod
+    def load(cls, path: Union[str, Path]) -> "BacktestResult":
+        """
+        从文件加载回测结果。
+
+        优先尝试加载 Pickle 格式的完整结果，
+        如果失败则从各个组件重新构建。
+
+        Args:
+            path: 保存路径前缀或目录
+
+        Returns:
+            BacktestResult 实例
+        """
+        load_path = Path(path)
+        if load_path.suffix == ".pkl":
+            # 直接加载 Pickle 文件
+            import pickle
+            with open(load_path, "rb") as f:
+                return pickle.load(f)
+
+        # 从目录加载
+        if not load_path.exists():
+            raise FileNotFoundError(f"回测结果目录不存在: {load_path}")
+
+        # 1. 尝试加载 Pickle 完整结果
+        pickle_path = load_path / "result.pkl"
+        if pickle_path.exists():
+            import pickle
+            with open(pickle_path, "rb") as f:
+                return pickle.load(f)
+
+        # 2. 从各个组件重新构建
+        # 加载元数据
+        with open(load_path / "metadata.json", "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+
+        # 创建结果对象
+        result = cls(
+            initial_cash=metadata["initial_cash"],
+            final_value=metadata["final_value"],
+            total_return=metadata["total_return"],
+            annual_return=metadata["annual_return"],
+            sharpe_ratio=metadata["sharpe_ratio"],
+            max_drawdown=metadata["max_drawdown"],
+            max_drawdown_len=metadata["max_drawdown_len"],
+            config=metadata.get("config", {}),
+            git_commit_hash=metadata.get("git_commit_hash", "unknown"),
+            timestamp=metadata.get("timestamp", ""),
+        )
+
+        # 加载 DataFrame 组件
+        equity_path = load_path / "equity_curve.parquet"
+        if equity_path.exists():
+            result.equity_curve = pd.read_parquet(equity_path)
+
+        trades_path = load_path / "trades.parquet"
+        if trades_path.exists():
+            result.trades = pd.read_parquet(trades_path)
+
+        trade_details_path = load_path / "trade_details.parquet"
+        if trade_details_path.exists():
+            result.trade_details = pd.read_parquet(trade_details_path)
+
+        position_path = load_path / "position_details.parquet"
+        if position_path.exists():
+            result.position_details = pd.read_parquet(position_path)
+
+        rebalance_path = load_path / "rebalance_details.parquet"
+        if rebalance_path.exists():
+            result.rebalance_details = pd.read_parquet(rebalance_path)
+
+        # 加载分析器结果
+        analyzers_path = load_path / "analyzers.json"
+        if analyzers_path.exists():
+            with open(analyzers_path, "r", encoding="utf-8") as f:
+                result.analyzers = json.load(f)
+
+        return result
 
 
 class PandasDataFeed(bt.feeds.PandasData):

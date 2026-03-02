@@ -53,3 +53,19 @@ tests/test_outputs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# 临时测试文件
+test_*.py
+!tests/
+
+# 备份文件
+*_backup.jsonl
+*_backup.*
+
+# 临时测试文件
+test_*.py
+!tests/
+
+# 备份文件
+*_backup.jsonl
+*_backup.*

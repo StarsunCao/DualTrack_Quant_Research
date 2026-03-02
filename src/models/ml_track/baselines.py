@@ -20,6 +20,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 检测设备并设置优先级：MPS (Apple Silicon) > CUDA > CPU
 def get_best_device() -> torch.device:
@@ -400,7 +405,8 @@ class LSTMModel(BaseModel):
 
         # 训练
         self.model.train()
-        for epoch in range(self.epochs):
+        progress_bar = tqdm(range(self.epochs), desc="LSTM Training", unit="epoch")
+        for epoch in progress_bar:
             total_loss = 0
             for batch_X, batch_y in dataloader:
                 optimizer.zero_grad()
@@ -410,13 +416,16 @@ class LSTMModel(BaseModel):
                 optimizer.step()
                 total_loss += loss.item()
 
-            if (epoch + 1) % 10 == 0:
-                avg_loss = total_loss / len(dataloader)
-                print(f"  Epoch [{epoch+1}/{self.epochs}], Loss: {avg_loss:.4f}")
+            avg_loss = total_loss / len(dataloader)
+            progress_bar.set_postfix({"loss": f"{avg_loss:.4f}"})
+
+            if (epoch + 1) % 10 == 0 or epoch == 0:
+                logger.debug(f"Epoch [{epoch+1}/{self.epochs}], Loss: {avg_loss:.4f}")
 
         self.train_time = time.time() - start_time
         self.is_fitted = True
-        print(f"  LSTM 训练完成，耗时: {self.train_time:.2f}秒，设备: {DEVICE}")
+        progress_bar.close()
+        logger.info(f"LSTM 训练完成，耗时: {self.train_time:.2f}秒，设备: {DEVICE}")
 
         return self
 

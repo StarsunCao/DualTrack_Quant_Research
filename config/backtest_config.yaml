@@ -1,0 +1,101 @@
+# 回测配置文件
+# 配置回测引擎参数
+
+# 回测基本参数
+backtest:
+  # 默认资金配置
+  initial_cash: 100000.0
+  commission: 0.0002      # 万分之二
+  slippage_perc: 0.0     # 滑点
+  stamp_duty: 0.0        # 印花税
+
+  # 调仓配置
+  rebalancing:
+    frequency: 1          # 调仓频率（天）
+    threshold: 0.05       # 调仓阈值（权重变化超过此值才调仓）
+    dead_zone: 0.05       # 调仓死区
+
+  # 风险控制
+  risk_control:
+    max_position_size: 1.0    # 最大仓位
+    min_position_size: 0.0    # 最小仓位
+    max_drawdown_limit: 0.3   # 最大回撤限制
+    stop_loss: null           # 止损（可选）
+    take_profit: null         # 止盈（可选）
+
+# 分析器配置
+analyzers:
+  # 时间序列收益率
+  time_return:
+    enabled: true
+
+  # 夏普比率
+  sharpe_ratio:
+    enabled: true
+    risk_free_rate: 0.02
+    annualize: true
+
+  # 回撤分析
+  drawdown:
+    enabled: true
+
+  # 收益率分析
+  returns:
+    enabled: true
+
+  # 交易分析
+  trade_analyzer:
+    enabled: true
+
+# 多轨道对比配置
+multi_track:
+  tracks:
+    - "lr"
+    - "lstm"
+    - "lgb"
+    - "llm-cloud"
+    - "llm-local"
+
+  # 信号融合配置（独立运行时不使用）
+  fusion:
+    enabled: false
+    default_weights:
+      lr: 0.233
+      lstm: 0.233
+      lgb: 0.234
+      llm: 0.3
+
+    # 市场状态配置
+    market_states:
+      normal:
+        volatility_threshold: 0.02
+        ml_weight: 0.7
+        llm_weight: 0.3
+      high_volatility:
+        volatility_threshold: 0.05
+        ml_weight: 0.5
+        llm_weight: 0.5
+      black_swan:
+        volatility_threshold: 0.10
+        ml_weight: 0.0
+        llm_weight: 1.0
+        llm_veto: true
+
+# 输出配置
+output:
+  results_dir: "docs/output"
+  figures_dir: "docs/figures"
+  cache_dir: "docs/cache"
+
+  # 保存选项
+  save_trades: true
+  save_positions: true
+  save_rebalances: true
+  save_equity_curve: true
+  save_analyzers: true
+
+  # 报告配置
+  report:
+    format: ["markdown", "csv", "json"]
+    include_charts: true
+    include_comparison: true

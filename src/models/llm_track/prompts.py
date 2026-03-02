@@ -38,91 +38,32 @@ class SentimentPromptBuilder:
         )
     """
 
-    # 系统提示词 - 定义角色和行为规范
-    SYSTEM_PROMPT = """你是一位专业的量化交易分析师，专注于金融市场情绪分析和交易信号生成。
+    # 系统提示词 - 增强约束力，确保格式正确
+    SYSTEM_PROMPT = """量化分析师。基于每日新闻给出交易决策。
 
-## 你的核心能力
-1. **深度分析**: 对金融新闻进行多维度情绪分析
-2. **逻辑推理**: 使用 Chain-of-Thought 方法进行逐步推理
-3. **风险意识**: 始终考虑市场风险和不确定性
-4. **结构化输出**: 按照指定格式输出分析结果
+严格要求：
+1. 只输出JSON格式，不要输出其他任何文字
+2. 必须包含三个字段：signal, confidence, reason
+3. signal只能是：buy, sell, hold（小写）
+4. confidence范围：0.0-1.0之间的数字
+5. reason是简短的推理文字
 
-## 分析框架
-- **宏观层面**: 政策、经济数据、国际形势
-- **行业层面**: 行业动态、竞争格局、技术变革
-- **公司层面**: 财务数据、管理层变动、业务发展
-- **市场情绪**: 资金流向、投资者情绪、技术指标
+禁止输出：decision, rating, stock_list等字段
+禁止添加任何说明文字或markdown标记"""
 
-## 决策原则
-1. 保守原则: 在不确定性高时倾向于观望
-2. 证据导向: 每个判断都需要明确的证据支撑
-3. 风险收益平衡: 综合评估潜在收益和风险
-4. 时效性考量: 考虑信息的时效性和市场反应
+    # 用户提示词模板 - 强调格式
+    USER_PROMPT_TEMPLATE = """{date}|{market_context}|{news_text}
 
-## 输出要求
-严格按照指定的 JSON 格式输出，不要添加任何额外解释。"""
-
-    # 用户提示词模板 - 包含 CoT 引导
-    USER_PROMPT_TEMPLATE = """## 市场背景
-{market_context}
-
-## 新闻/研报内容
-{news_text}
-
-## 分析任务
-请按照以下步骤进行 Chain-of-Thought 推理分析：
-
-### 第一步：信息提取
-- 提取新闻中的关键信息点
-- 识别涉及的行业、公司、政策等主体
-- 判断信息的重要性和时效性
-
-### 第二步：情绪分析
-- 分析新闻的情感倾向（正面/负面/中性）
-- 评估对市场可能的影响方向
-- 考虑市场已有预期的对比
-
-### 第三步：影响评估
-- 评估对相关资产的潜在影响程度
-- 考虑影响的持续时间（短期/中期/长期）
-- 分析可能的风险因素
-
-### 第四步：决策推理
-- 综合以上分析得出交易建议
-- 评估决策的确信程度
-- 说明主要的风险点
-
-### 第五步：输出结果
-根据分析结果，输出以下 JSON 格式：
-
+严格按照此格式输出（不要修改字段名）：
 {output_format}
 
-请开始分析："""
+记住：只输出JSON，不要其他文字！"""
 
-    # 输出格式说明
-    OUTPUT_FORMAT = """```json
-{
-    "signal": "buy" | "sell" | "hold",
-    "confidence": 0.0-1.0,
-    "reasoning": {
-        "key_points": ["关键信息点1", "关键信息点2"],
-        "sentiment": "positive" | "negative" | "neutral",
-        "impact_analysis": "影响分析说明",
-        "risk_factors": ["风险因素1", "风险因素2"],
-        "time_horizon": "short_term" | "medium_term" | "long_term"
-    },
-    "summary": "一句话总结分析结论"
-}
-```"""
+    # 输出格式说明（更明确）
+    OUTPUT_FORMAT = '''{"signal":"buy"或"sell"或"hold","confidence":0.0到1.0之间的数字,"reason":"简短推理"}'''
 
-    # 简化版输出格式（用于批量处理）
-    SIMPLE_OUTPUT_FORMAT = """```json
-{
-    "signal": "buy" | "sell" | "hold",
-    "confidence": 0.0-1.0,
-    "reasoning": "简要推理过程（100字以内）"
-}
-```"""
+    # 简化版输出格式（默认）
+    SIMPLE_OUTPUT_FORMAT = '{"s":"b"或"s"或"h","c":0.0到1.0,"r":"推理"}'
 
     def __init__(
         self,
@@ -146,6 +87,7 @@ class SentimentPromptBuilder:
         self,
         market_context: str,
         news_text: str,
+        date: str = "",
     ) -> PromptTemplate:
         """
         构建完整的 Prompt 模板。
@@ -153,11 +95,23 @@ class SentimentPromptBuilder:
         Args:
             market_context: 市场背景信息，如指数涨跌、近期走势等。
             news_text: 新闻/研报文本内容。
+            date: 日期字符串（YYYY-MM-DD），可选。
 
         Returns:
             PromptTemplate 对象，包含系统提示词和用户提示词。
         """
+        # 简化日期格式：只保留日期部分
+        if date and len(date) > 10:
+            date = date[:10]
+
+        # 简化市场信息（如果过长）
+        market_context = market_context.strip()
+
+        # 简化新闻文本（移除多余空格）
+        news_text = news_text.strip()
+
         user_prompt = self.USER_PROMPT_TEMPLATE.format(
+            date=date,
             market_context=market_context,
             news_text=news_text,
             output_format=self.output_format,
@@ -261,7 +215,7 @@ class TradingDecisionParser:
         if matches:
             json_str = matches[0]
         else:
-            # 尝试直接查找 JSON 对象
+            # 尝试直接查找 JSON 对象（支持紧凑格式）
             json_pattern = r"\{[^{}]*\}"
             matches = re.findall(json_pattern, response_text, re.DOTALL)
             if matches:
@@ -273,37 +227,96 @@ class TradingDecisionParser:
         try:
             parsed = json.loads(json_str)
 
-            # 提取 signal
-            signal = parsed.get("signal", "hold").lower()
+            # ========== 新增：处理错误格式 ==========
+
+            # 格式1: {"decision": "hold"} 或 {"decision": "sell", "rationale": "..."}
+            if "decision" in parsed:
+                signal = parsed.get("decision", "hold").lower()
+                reasoning = parsed.get("rationale", parsed.get("reasoning", ""))
+                confidence = 0.6
+                result["signal"] = signal if signal in ["buy", "sell", "hold"] else "hold"
+                result["confidence"] = confidence
+                result["reasoning"] = str(reasoning) if reasoning else "无推理说明"
+                result["parse_success"] = True
+                return result
+
+            # 格式2: {"rating": "hold", "summary": "...", "stock_list": [...]}
+            if "rating" in parsed and "stock_list" not in parsed:
+                # 只有rating字段，直接使用
+                signal = parsed.get("rating", "hold").lower()
+                reasoning = parsed.get("summary", parsed.get("reason", ""))
+                confidence = 0.6
+                result["signal"] = signal if signal in ["buy", "sell", "hold"] else "hold"
+                result["confidence"] = confidence
+                result["reasoning"] = str(reasoning) if reasoning else "无推理说明"
+                result["parse_success"] = True
+                return result
+
+            # 格式3: {"rating": "hold", "stock_list": [...]}
+            if "rating" in parsed and "stock_list" in parsed:
+                signal = parsed.get("rating", "hold").lower()
+                summary = parsed.get("summary", "")
+
+                # 提取stock_list中的关键信息
+                stock_list = parsed.get("stock_list", [])
+                if isinstance(stock_list, list) and len(stock_list) > 0:
+                    # 提取前3条股票的reason
+                    stock_reasons = []
+                    for stock in stock_list[:3]:
+                        if isinstance(stock, dict):
+                            symbol = stock.get("symbol", "")
+                            rating = stock.get("rating", "")
+                            reason = stock.get("reason", "")
+                            if symbol and reason:
+                                stock_reasons.append(f"{symbol}({rating}): {reason}")
+
+                    reasoning = summary
+                    if stock_reasons:
+                        reasoning += " | " + "; ".join(stock_reasons)
+                else:
+                    reasoning = summary
+
+                confidence = 0.6  # 默认置信度
+                result["signal"] = signal if signal in ["buy", "sell", "hold"] else "hold"
+                result["confidence"] = confidence
+                result["reasoning"] = str(reasoning) if reasoning else "无推理说明"
+                result["parse_success"] = True
+                return result
+            # ========== 错误格式处理结束 ==========
+
+            # 支持标准格式和紧凑格式
+            # 标准格式: signal/confidence/reasoning
+            # 紧凑格式: s/c/r
+            signal = parsed.get("signal", parsed.get("s", "hold")).lower()
+            confidence = parsed.get("confidence", parsed.get("c", 0.5))
+            reasoning = parsed.get("reasoning", parsed.get("reason", parsed.get("r", "")))
+
+            # 映射紧凑信号值
+            signal_map = {"b": "buy", "s": "sell", "h": "hold"}
+            signal = signal_map.get(signal, signal)
+
+            # 验证 signal
             if signal in ["buy", "sell", "hold"]:
                 result["signal"] = signal
             else:
                 result["signal"] = "hold"
 
             # 提取 confidence
-            confidence = parsed.get("confidence", 0.5)
             if isinstance(confidence, (int, float)):
                 result["confidence"] = max(0.0, min(1.0, float(confidence)))
             else:
                 result["confidence"] = 0.5
 
             # 提取 reasoning
-            if "reasoning" in parsed:
-                reasoning = parsed["reasoning"]
-                if isinstance(reasoning, dict):
-                    # 详细格式
-                    result["reasoning"] = reasoning.get("summary", str(reasoning))
-                else:
-                    result["reasoning"] = str(reasoning)
-            elif "summary" in parsed:
-                result["reasoning"] = parsed["summary"]
+            if isinstance(reasoning, dict):
+                result["reasoning"] = reasoning.get("summary", str(reasoning))
             else:
-                result["reasoning"] = str(parsed)
+                result["reasoning"] = str(reasoning) if reasoning else str(parsed)
 
             result["parse_success"] = True
 
         except json.JSONDecodeError as e:
-            result["reasoning"] = f"JSON 解析错误: {str(e)}"
+            result["reasoning"] = f"JSON解析错误:{str(e)}"
 
         return result
 
