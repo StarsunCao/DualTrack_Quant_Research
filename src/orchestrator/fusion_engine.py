@@ -119,7 +119,10 @@ class SignalConverter:
         ohlcv_dates: pd.DatetimeIndex = None
     ) -> dict:
         """
-        将 LLM 信号转换为目标仓位（支持交易日对齐）。
+        将 LLM 信号转换为目标仓位（支持交易日对齐，T-1信号做T决策）。
+
+        关键修正：LLM信号的timestamp是决策日期（T），实际应该使用T-1的新闻和
+        数据做出T日的决策。因此，信号timestamp对应的是T日的仓位。
 
         Args:
             llm_signals: LLM Track 信号 DataFrame
@@ -160,6 +163,13 @@ class SignalConverter:
         # 3. 转换为权重
         daily_df['weight'] = daily_df['signal'].map(signal_map) * daily_df['confidence']
 
+        # ====================================================================
+        # 关键修正：时间对齐
+        # LLM缓存中的timestamp是决策日期（T），即使用T-1数据做出T日决策
+        # 因此，信号timestamp对应的权重应该应用于T日
+        # 不需要额外调整，因为timestamp已经是决策日期
+        # ====================================================================
+
         # 4. 如果提供了OHLCV日期，对齐到交易日
         if ohlcv_dates is not None:
             aligned = align_to_trading_days(daily_df, ohlcv_dates)
@@ -174,7 +184,7 @@ class SignalConverter:
             symbol = daily_df['symbol'].iloc[0] if 'symbol' in daily_df.columns else "CSI300"
             positions = fill_missing_trading_days(positions, ohlcv_dates, default_weight=0.0, symbol=symbol)
         else:
-            # 不对齐，直接使用信号日期
+            # 不对齐，直接使用信号日期（决策日期）
             for _, row in daily_df.iterrows():
                 positions[row['timestamp']] = {row['symbol']: row['weight']}
 

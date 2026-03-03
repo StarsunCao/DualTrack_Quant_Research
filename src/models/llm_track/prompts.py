@@ -39,22 +39,41 @@ class SentimentPromptBuilder:
     """
 
     # 系统提示词 - 增强约束力，确保格式正确
-    SYSTEM_PROMPT = """量化分析师。基于每日新闻给出交易决策。
+    SYSTEM_PROMPT = """量化分析师。基于昨日(T-1日)收盘数据和新闻，给出今日(T日)交易决策。
 
 严格要求：
 1. 只输出JSON格式，不要输出其他任何文字
 2. 必须包含三个字段：signal, confidence, reason
 3. signal只能是：buy, sell, hold（小写）
 4. confidence范围：0.0-1.0之间的数字
-5. reason是简短的推理文字
+5. reason是简短的推理文字（结合技术面和消息面）
+
+决策逻辑：
+- 你看到的是T-1日的收盘数据和T-1日发生的新闻事件
+- 你需要基于这些信息，预测T日的市场走势并给出交易信号
+- 综合考虑昨日价格走势、技术指标和新闻事件的影响
+- 注意风险控制，避免过度激进
+- 不确定时选择hold
+
+时间说明：
+- T-1日：昨日收盘后的数据（价格、成交量、波动率）
+- T日：今日需要做出决策的交易日
+- 新闻：T-1日收盘后到T日开盘前披露的信息
 
 禁止输出：decision, rating, stock_list等字段
 禁止添加任何说明文字或markdown标记"""
 
     # 用户提示词模板 - 强调格式
-    USER_PROMPT_TEMPLATE = """{date}|{market_context}|{news_text}
+    USER_PROMPT_TEMPLATE = """【决策说明】
+基于以下T-1日(昨日)的数据，做出T日(今日)的交易决策。
 
-严格按照此格式输出（不要修改字段名）：
+【T-1日市场数据】
+{market_context}
+
+【T-1日新闻事件】
+{news_text}
+
+请给出T日(今日)的交易信号：
 {output_format}
 
 记住：只输出JSON，不要其他文字！"""

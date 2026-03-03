@@ -764,7 +764,7 @@ class LLMTradingAgent:
 
         def process_news(news: dict) -> dict:
             """处理单条新闻。"""
-            timestamp = news.get("timestamp")
+            timestamp = news.get("timestamp") or news.get("decision_date")
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp)
 
@@ -778,9 +778,12 @@ class LLMTradingAgent:
                 )
             )
 
+            # 支持从news字典中读取market_context（包含价格数据）
+            news_market_context = news.get("market_context", market_context)
+
             response = self.analyze(
                 news_text=news_text,
-                market_context=market_context,
+                market_context=news_market_context,
                 symbol=symbol,
                 timestamp=timestamp,
             )
@@ -798,7 +801,7 @@ class LLMTradingAgent:
 
             # 实时追加保存（支持断点续传）
             if cache_path:
-                self._append_to_cache(cache_path, result, news_text=news_text, market_context=market_context)
+                self._append_to_cache(cache_path, result, news_text=news_text, market_context=news_market_context)
 
             return result
 
@@ -875,6 +878,62 @@ class LLMTradingAgent:
 
         except Exception as e:
             print(f"加载缓存失败: {e}")
+
+    def get_signals_from_cache(self, symbol: str = "UNKNOWN") -> pd.DataFrame:
+        """
+        直接从缓存生成信号DataFrame（用于回测）。
+
+        不需要新闻数据，直接读取缓存中的信号。
+
+        Args:
+            symbol: 资产代码。
+
+        Returns:
+            包含交易信号的 DataFrame，列包括：
+            - timestamp: 时间戳
+            - symbol: 资产代码
+            - llm_signal: 交易信号
+            - reasoning: 推理过程
+            - latency_ms: 延迟
+            - confidence: 确信度
+        """
+        if not self._cache:
+            logger.warning("缓存为空，无法生成信号")
+            return pd.DataFrame()
+
+        results = []
+        for cache_entry in self._cache.values():
+            # 过滤指定symbol
+            if cache_entry.symbol != symbol:
+                continue
+
+            # 解析时间戳
+            ts = cache_entry.timestamp
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts)
+                except:
+                    continue
+
+            results.append({
+                "timestamp": ts,
+                "symbol": cache_entry.symbol,
+                "llm_signal": cache_entry.signal,
+                "reasoning": cache_entry.reasoning,
+                "latency_ms": cache_entry.latency_ms,
+                "confidence": cache_entry.confidence,
+                "model": cache_entry.model,
+            })
+
+        if not results:
+            logger.warning(f"缓存中没有找到 symbol={symbol} 的信号")
+            return pd.DataFrame()
+
+        df = pd.DataFrame(results)
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        logger.info(f"从缓存生成 {len(df)} 条信号")
+
+        return df
 
     def _save_cache(self, cache_path: Path, results: list[dict]) -> None:
         """

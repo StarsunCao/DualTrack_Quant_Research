@@ -86,9 +86,9 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 # ============================================================================
 @cli.command("run")
 @click.option("--track", "-t",
-              type=click.Choice(["lr", "lstm", "lgb", "llm-cloud", "llm-local", "all"]),
+              type=click.Choice(["lr", "lstm", "lgb", "llm-cloud", "llm-local-14b", "llm-local-8b", "all"]),
               default="all",
-              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, llm-cloud=云端LLM, llm-local=本地LLM, all=全部")
+              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, llm-cloud=DeepSeek官方, llm-local-14b=SiliconFlow14B, llm-local-8b=SiliconFlow8B, all=全部")
 @click.option("--symbol", "-s", default="CSI300", help="交易标的 (CSI300/QQQ)")
 @click.option("--start", default="2026-01-09", help="回测开始日期")
 @click.option("--end", default="2026-02-28", help="回测结束日期")
@@ -158,12 +158,27 @@ def run_backtest(
         # 获取价格数据
         fetcher = MarketDataFetcher()
 
-        # 优先读取真实数据文件
-        real_data_path = Path(f"data/raw/real_{symbol.lower()}_1y.csv")
+        # 根据回测日期范围选择合适的数据文件
+        start_dt = pd.to_datetime(start)
+        end_dt = pd.to_datetime(end)
+        date_range_days = (end_dt - start_dt).days
+
+        # 优先读取真实数据文件（根据日期范围选择）
+        real_data_path = None
+        if date_range_days > 400:  # 超过1年，使用5年数据
+            real_data_path = Path(f"data/raw/real_{symbol.lower()}_5y.csv")
+        else:
+            real_data_path = Path(f"data/raw/real_{symbol.lower()}_1y.csv")
+
         if real_data_path.exists():
             click.echo(f"  使用真实 OHLCV 数据: {real_data_path}")
             ohlcv_data = pd.read_csv(real_data_path, parse_dates=["date"])
             ohlcv_data.set_index("date", inplace=True)
+            # 根据日期范围过滤
+            ohlcv_data = ohlcv_data[
+                (ohlcv_data.index >= start_dt) & (ohlcv_data.index <= end_dt)
+            ]
+            click.echo(f"  过滤后数据: {len(ohlcv_data)} 条 (日期范围: {start} ~ {end})")
         elif symbol == "CSI300":
             ohlcv_data = fetcher.fetch_csi300(start_date=start, end_date=end)
         elif symbol == "QQQ":
@@ -176,27 +191,35 @@ def run_backtest(
         click.echo(f"  ✅ OHLCV 数据: {len(ohlcv_data)} 条")
 
         # 优先读取真实新闻数据
-        real_news_path = Path("data/raw/real_csi300_news_3m.csv")
-        if real_news_path.exists() and symbol == "CSI300":
-            click.echo(f"  使用真实新闻数据: {real_news_path}")
-            news_data = pd.read_csv(real_news_path, parse_dates=["timestamp"])
+        news_file_path = Path("data/raw/csi300_news_combined_2020_2024.csv")
+        if news_file_path.exists() and symbol == "CSI300" and start_dt.year < 2025:
+            click.echo(f"  使用真实新闻数据: {news_file_path}")
+            news_data = pd.read_csv(news_file_path, parse_dates=["timestamp"])
             # 过滤时间范围
-            start_dt = pd.to_datetime(start)
-            end_dt = pd.to_datetime(end)
             news_data = news_data[
                 (news_data["timestamp"] >= start_dt) & (news_data["timestamp"] <= end_dt)
             ]
-            click.echo(f"  ✅ 新闻数据: {len(news_data)} 条")
+            click.echo(f"  ✅ 新闻数据: {len(news_data)} 条 (日期范围: {start} ~ {end})")
         else:
-            # 生成 Mock 新闻数据
-            click.echo("  生成 Mock 新闻数据...")
-            news_generator = MockNewsGenerator()
-            news_data = news_generator.generate_mock_news(
-                start_date=start,
-                end_date=end,
-                symbols=[symbol],
-            )
-            click.echo(f"  ✅ 新闻数据: {len(news_data)} 条")
+            real_news_path = Path("data/raw/real_csi300_news_3m.csv")
+            if real_news_path.exists() and symbol == "CSI300":
+                click.echo(f"  使用真实新闻数据: {real_news_path}")
+                news_data = pd.read_csv(real_news_path, parse_dates=["timestamp"])
+                # 过滤时间范围
+                news_data = news_data[
+                    (news_data["timestamp"] >= start_dt) & (news_data["timestamp"] <= end_dt)
+                ]
+                click.echo(f"  ✅ 新闻数据: {len(news_data)} 条")
+            else:
+                # 生成 Mock 新闻数据
+                click.echo("  生成 Mock 新闻数据...")
+                news_generator = MockNewsGenerator()
+                news_data = news_generator.generate_mock_news(
+                    start_date=start,
+                    end_date=end,
+                    symbols=[symbol],
+                )
+                click.echo(f"  ✅ 新闻数据: {len(news_data)} 条")
 
         # 数据对齐（简化版：直接使用原始数据）
         aligned_data = {"ohlcv": ohlcv_data, "news": news_data}
@@ -211,10 +234,10 @@ def run_backtest(
     # Phase 2-3: 五轨道信号生成
     # ================================================================
 
-    # 确定要运行的轨道
+    确定要运行的轨道
     tracks_to_run = []
     if track == "all":
-        tracks_to_run = ["lr", "lstm", "lgb", "llm-cloud", "llm-local"]
+        tracks_to_run = ["lr", "lstm", "lgb", "llm-cloud", "llm-local-14b", "llm-local-8b"]
     else:
         tracks_to_run = [track]
 
@@ -243,31 +266,53 @@ def run_backtest(
             from src.models.ml_track.baselines import LogisticRegressionModel
             from src.models.ml_track.features import FeatureEngineer
 
-            if features_df is not None and len(features_df) > 50:
-                # 准备数据
-                engineer = FeatureEngineer()
-                features_with_target = engineer.create_target(features_df.copy(), forward_period=1)
-                features_with_target = features_with_target.dropna()
+            # 加载训练数据（2015-2019）
+            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            if train_data_path.exists():
+                click.echo(f"  加载训练数据: {train_data_path}")
+                train_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
+                train_ohlcv.set_index("date", inplace=True)
 
-                feature_cols = [c for c in features_with_target.columns if c not in ['target_label', 'target_return', 'symbol']]
-                X = features_with_target[feature_cols].values
-                y = features_with_target['target_label'].values
+                # 在训练数据上计算特征
+                click.echo("  计算训练集特征...")
+                train_engineer = FeatureEngineer()
+                train_features = train_engineer.compute_all_features(train_ohlcv, drop_na=True)
+                train_features_with_target = train_engineer.create_target(train_features.copy(), forward_period=1)
+                train_features_with_target = train_features_with_target.dropna()
+
+                feature_cols = [c for c in train_features_with_target.columns if c not in ['target_label', 'target_return', 'symbol']]
+                X_train = train_features_with_target[feature_cols].values
+                y_train = train_features_with_target['target_label'].values
+
+                click.echo(f"  训练集大小: {len(X_train)} 天")
 
                 # 训练模型
                 lr_model = LogisticRegressionModel()
-                split_idx = int(len(X) * 0.8)
-                lr_model.fit(X[:split_idx], y[:split_idx])
+                lr_model.fit(X_train, y_train)
+                click.echo(f"  ✅ 模型训练完成")
 
-                # 生成信号
-                proba = lr_model.predict_proba(X)
-                lr_signals = pd.DataFrame({
-                    'timestamp': features_with_target.index,
-                    'symbol': symbol,
-                    'model_name': 'LogisticRegression',
-                    'signal_strength_0_to_1': proba,
-                    'latency_ms': 2.0
-                })
+                # 在测试数据（2020-2024）上生成信号
+                click.echo("  在测试集（2020-2024）上生成信号...")
+                if features_df is not None and len(features_df) > 50:
+                    test_engineer = FeatureEngineer()
+                    test_features_with_target = test_engineer.create_target(features_df.copy(), forward_period=1)
+                    test_features_with_target = test_features_with_target.dropna()
+
+                    X_test = test_features_with_target[feature_cols].values
+                    proba = lr_model.predict_proba(X_test)
+
+                    lr_signals = pd.DataFrame({
+                        'timestamp': test_features_with_target.index,
+                        'symbol': symbol,
+                        'model_name': 'LogisticRegression',
+                        'signal_strength_0_to_1': proba,
+                        'latency_ms': 2.0
+                    })
+                else:
+                    lr_signals = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
             else:
+                click.echo(f"  ⚠️ 训练数据不存在: {train_data_path}")
+                click.echo(f"  请先运行: python scripts/fetch_training_data.py")
                 lr_signals = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
             track_signals["lr"] = lr_signals
@@ -283,18 +328,27 @@ def run_backtest(
             from src.models.ml_track.baselines import LSTMModel
             from src.models.ml_track.features import FeatureEngineer
 
-            if features_df is not None and len(features_df) > 100:
-                # 准备数据
-                engineer = FeatureEngineer()
-                features_with_target = engineer.create_target(features_df.copy(), forward_period=1)
-                features_with_target = features_with_target.dropna()
+            # 加载训练数据（2015-2019）
+            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            if train_data_path.exists():
+                click.echo(f"  加载训练数据: {train_data_path}")
+                train_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
+                train_ohlcv.set_index("date", inplace=True)
 
-                feature_cols = [c for c in features_with_target.columns if c not in ['target_label', 'target_return', 'symbol']]
-                X = features_with_target[feature_cols].values
-                y = features_with_target['target_label'].values
+                # 在训练数据上计算特征
+                click.echo("  计算训练集特征...")
+                train_engineer = FeatureEngineer()
+                train_features = train_engineer.compute_all_features(train_ohlcv, drop_na=True)
+                train_features_with_target = train_engineer.create_target(train_features.copy(), forward_period=1)
+                train_features_with_target = train_features_with_target.dropna()
+
+                feature_cols = [c for c in train_features_with_target.columns if c not in ['target_label', 'target_return', 'symbol']]
+                X_train = train_features_with_target[feature_cols].values
+                y_train = train_features_with_target['target_label'].values
+
+                click.echo(f"  训练集大小: {len(X_train)} 天")
 
                 # 训练模型
-                device = "mps" if torch.backends.mps.is_available() else "cpu"
                 lstm_model = LSTMModel(
                     input_dim=len(feature_cols),
                     hidden_dim=64,
@@ -302,19 +356,31 @@ def run_backtest(
                     epochs=10,
                     sequence_length=20
                 )
-                split_idx = int(len(X) * 0.8)
-                lstm_model.fit(X[:split_idx], y[:split_idx])
+                lstm_model.fit(X_train, y_train)
+                click.echo(f"  ✅ 模型训练完成")
 
-                # 生成信号
-                proba = lstm_model.predict_proba(X)
-                lstm_signals = pd.DataFrame({
-                    'timestamp': features_with_target.index,
-                    'symbol': symbol,
-                    'model_name': 'LSTM',
-                    'signal_strength_0_to_1': proba,
-                    'latency_ms': 15.0
-                })
+                # 在测试数据（2020-2024）上生成信号
+                click.echo("  在测试集（2020-2024）上生成信号...")
+                if features_df is not None and len(features_df) > 100:
+                    test_engineer = FeatureEngineer()
+                    test_features_with_target = test_engineer.create_target(features_df.copy(), forward_period=1)
+                    test_features_with_target = test_features_with_target.dropna()
+
+                    X_test = test_features_with_target[feature_cols].values
+                    proba = lstm_model.predict_proba(X_test)
+
+                    lstm_signals = pd.DataFrame({
+                        'timestamp': test_features_with_target.index,
+                        'symbol': symbol,
+                        'model_name': 'LSTM',
+                        'signal_strength_0_to_1': proba,
+                        'latency_ms': 15.0
+                    })
+                else:
+                    lstm_signals = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
             else:
+                click.echo(f"  ⚠️ 训练数据不存在: {train_data_path}")
+                click.echo(f"  请先运行: python scripts/fetch_training_data.py")
                 lstm_signals = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
             track_signals["lstm"] = lstm_signals
@@ -330,31 +396,53 @@ def run_backtest(
             from src.models.ml_track.baselines import LightGBMModel
             from src.models.ml_track.features import FeatureEngineer
 
-            if features_df is not None and len(features_df) > 50:
-                # 准备数据
-                engineer = FeatureEngineer()
-                features_with_target = engineer.create_target(features_df.copy(), forward_period=1)
-                features_with_target = features_with_target.dropna()
+            # 加载训练数据（2015-2019）
+            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            if train_data_path.exists():
+                click.echo(f"  加载训练数据: {train_data_path}")
+                train_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
+                train_ohlcv.set_index("date", inplace=True)
 
-                feature_cols = [c for c in features_with_target.columns if c not in ['target_label', 'target_return', 'symbol']]
-                X = features_with_target[feature_cols].values
-                y = features_with_target['target_label'].values
+                # 在训练数据上计算特征
+                click.echo("  计算训练集特征...")
+                train_engineer = FeatureEngineer()
+                train_features = train_engineer.compute_all_features(train_ohlcv, drop_na=True)
+                train_features_with_target = train_engineer.create_target(train_features.copy(), forward_period=1)
+                train_features_with_target = train_features_with_target.dropna()
+
+                feature_cols = [c for c in train_features_with_target.columns if c not in ['target_label', 'target_return', 'symbol']]
+                X_train = train_features_with_target[feature_cols].values
+                y_train = train_features_with_target['target_label'].values
+
+                click.echo(f"  训练集大小: {len(X_train)} 天")
 
                 # 训练模型
                 lgb_model = LightGBMModel(n_estimators=100)
-                split_idx = int(len(X) * 0.8)
-                lgb_model.fit(X[:split_idx], y[:split_idx])
+                lgb_model.fit(X_train, y_train)
+                click.echo(f"  ✅ 模型训练完成")
 
-                # 生成信号
-                proba = lgb_model.predict_proba(X)
-                lgb_signals = pd.DataFrame({
-                    'timestamp': features_with_target.index,
-                    'symbol': symbol,
-                    'model_name': 'LightGBM',
-                    'signal_strength_0_to_1': proba,
-                    'latency_ms': 3.0
-                })
+                # 在测试数据（2020-2024）上生成信号
+                click.echo("  在测试集（2020-2024）上生成信号...")
+                if features_df is not None and len(features_df) > 50:
+                    test_engineer = FeatureEngineer()
+                    test_features_with_target = test_engineer.create_target(features_df.copy(), forward_period=1)
+                    test_features_with_target = test_features_with_target.dropna()
+
+                    X_test = test_features_with_target[feature_cols].values
+                    proba = lgb_model.predict_proba(X_test)
+
+                    lgb_signals = pd.DataFrame({
+                        'timestamp': test_features_with_target.index,
+                        'symbol': symbol,
+                        'model_name': 'LightGBM',
+                        'signal_strength_0_to_1': proba,
+                        'latency_ms': 3.0
+                    })
+                else:
+                    lgb_signals = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
             else:
+                click.echo(f"  ⚠️ 训练数据不存在: {train_data_path}")
+                click.echo(f"  请先运行: python scripts/fetch_training_data.py")
                 lgb_signals = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
             track_signals["lgb"] = lgb_signals
@@ -363,48 +451,86 @@ def run_backtest(
             click.echo(f"  ⚠️ LightGBM 失败，使用模拟信号: {e}")
             track_signals["lgb"] = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道4: LLM(Cloud) - DeepSeek
+    # 轨道4: LLM(Cloud) - 官方DeepSeek R1
     if "llm-cloud" in tracks_to_run:
-        click.echo("\n[轨道 4/5] LLM(Cloud) 信号生成...")
+        click.echo("\n[轨道 4/6] LLM(Cloud) - DeepSeek官方 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
-            # 检查缓存
-            cache_path = Path(f"docs/cache/llm_responses/llm_cache_{symbol}.jsonl")
-            if cache_path.exists():
-                llm_cloud_agent = LLMTradingAgent(executor_type="ollama")  # 优先使用本地缓存
-                llm_cloud_agent._load_cache(cache_path)
-            else:
-                llm_cloud_agent = LLMTradingAgent(executor_type="mock")
+            # 使用官方DeepSeek缓存
+            cache_path_deepseek_official = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_official.jsonl")
 
-            news_list = aligned_data.get("news", pd.DataFrame()).to_dict("records") if not aligned_data.get("news", pd.DataFrame()).empty else []
-            llm_cloud_signals = llm_cloud_agent.batch_analyze(news_list=news_list)
+            if cache_path_deepseek_official.exists():
+                llm_cloud_agent = LLMTradingAgent(executor_type="deepseek", model="deepseek-reasoner")
+                llm_cloud_agent._load_cache(cache_path_deepseek_official)
+                click.echo(f"  使用DeepSeek官方缓存: {cache_path_deepseek_official}")
+                llm_cloud_signals = llm_cloud_agent.get_signals_from_cache(symbol=symbol)
+            else:
+                click.echo(f"  ⚠️ 未找到DeepSeek官方缓存: {cache_path_deepseek_official}")
+                click.echo(f"  请先运行: python main.py cache-build --executor deepseek --symbol {symbol}")
+                llm_cloud_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
             track_signals["llm-cloud"] = llm_cloud_signals
             click.echo(f"  ✅ LLM(Cloud) 信号: {len(llm_cloud_signals)} 条")
         except Exception as e:
             click.echo(f"  ⚠️ LLM(Cloud) 失败，使用模拟信号: {e}")
             track_signals["llm-cloud"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道5: LLM(Local) - Ollama
-    if "llm-local" in tracks_to_run:
-        click.echo("\n[轨道 5/5] LLM(Local) 信号生成...")
+    # 轨道5: LLM(Local 14B) - DeepSeek 14B
+    if "llm-local-14b" in tracks_to_run:
+        click.echo("\n[轨道 5/6] LLM(Local 14B) - DeepSeek R1 14B 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
-            cache_path = Path(f"docs/cache/llm_responses/llm_cache_{symbol}.jsonl")
-            if cache_path.exists():
-                llm_local_agent = LLMTradingAgent(executor_type="ollama")
-                llm_local_agent._load_cache(cache_path)
-            else:
-                llm_local_agent = LLMTradingAgent(executor_type="mock")
+            # 使用DeepSeek 14B缓存
+            cache_path_deepseek_14b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_14b.jsonl")
 
-            news_list = aligned_data.get("news", pd.DataFrame()).to_dict("records") if not aligned_data.get("news", pd.DataFrame()).empty else []
-            llm_local_signals = llm_local_agent.batch_analyze(news_list=news_list)
-            track_signals["llm-local"] = llm_local_signals
-            click.echo(f"  ✅ LLM(Local) 信号: {len(llm_local_signals)} 条")
+            if cache_path_deepseek_14b.exists():
+                llm_local_14b_agent = LLMTradingAgent(
+                    executor_type="siliconflow",
+                    model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+                )
+                llm_local_14b_agent._load_cache(cache_path_deepseek_14b)
+                click.echo(f"  使用DeepSeek 14B缓存: {cache_path_deepseek_14b}")
+                llm_local_14b_signals = llm_local_14b_agent.get_signals_from_cache(symbol=symbol)
+            else:
+                click.echo(f"  ⚠️ 未找到DeepSeek 14B缓存: {cache_path_deepseek_14b}")
+                click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model deepseek-ai/DeepSeek-R1-Distill-Qwen-14B --symbol {symbol}")
+                llm_local_14b_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+            track_signals["llm-local-14b"] = llm_local_14b_signals
+            click.echo(f"  ✅ LLM(Local 14B) 信号: {len(llm_local_14b_signals)} 条")
         except Exception as e:
-            click.echo(f"  ⚠️ LLM(Local) 失败，使用模拟信号: {e}")
-            track_signals["llm-local"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+            click.echo(f"  ⚠️ LLM(Local 14B) 失败，使用模拟信号: {e}")
+            track_signals["llm-local-14b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+    # 轨道6: LLM(Local 8B) - DeepSeek 8B
+    if "llm-local-8b" in tracks_to_run:
+        click.echo("\n[轨道 6/6] LLM(Local 8B) - DeepSeek R1 8B 信号生成...")
+        try:
+            from src.models.llm_track.agent import LLMTradingAgent
+
+            # 使用DeepSeek 8B缓存
+            cache_path_deepseek_8b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_8b.jsonl")
+
+            if cache_path_deepseek_8b.exists():
+                llm_local_8b_agent = LLMTradingAgent(
+                    executor_type="siliconflow",
+                    model="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+                )
+                llm_local_8b_agent._load_cache(cache_path_deepseek_8b)
+                click.echo(f"  使用DeepSeek 8B缓存: {cache_path_deepseek_8b}")
+                llm_local_8b_signals = llm_local_8b_agent.get_signals_from_cache(symbol=symbol)
+            else:
+                click.echo(f"  ⚠️ 未找到DeepSeek 8B缓存: {cache_path_deepseek_8b}")
+                click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model deepseek-ai/DeepSeek-R1-0528-Qwen3-8B --symbol {symbol}")
+                llm_local_8b_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+            track_signals["llm-local-8b"] = llm_local_8b_signals
+            click.echo(f"  ✅ LLM(Local 8B) 信号: {len(llm_local_8b_signals)} 条")
+        except Exception as e:
+            click.echo(f"  ⚠️ LLM(Local 8B) 失败，使用模拟信号: {e}")
+            track_signals["llm-local-8b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
     # ================================================================
     # Phase 4: 信号转换 (独立运行，不融合！)
@@ -426,7 +552,7 @@ def run_backtest(
                 click.echo(f"  ⚠️ {track_name.upper()} 信号转换失败: {e}")
 
     # LLM Tracks 信号转换
-    for track_name in ["llm-cloud", "llm-local"]:
+    for track_name in ["llm-cloud", "llm-local-14b", "llm-local-8b"]:
         if track_name in track_signals:
             try:
                 track_positions[track_name] = SignalConverter.llm_signals_to_positions(
@@ -809,6 +935,30 @@ def cache_build(
             logger.warning(f"OHLCV数据文件不存在: {ohlcv_path}")
             ohlcv_data = None
 
+        # 加载北向资金数据（交易数据，像OHLCV一样处理）
+        northbound_path = Path("data/raw/northbound_flow_2020_2024.csv")
+        northbound_data = None
+        if northbound_path.exists():
+            northbound_data = pd.read_csv(northbound_path, parse_dates=["timestamp"])
+            northbound_data.set_index("timestamp", inplace=True)
+            logger.info(f"加载北向资金数据: {len(northbound_data)} 条")
+        else:
+            logger.warning(f"北向资金数据文件不存在: {northbound_path}")
+
+        # 加载宏观数据（定期发布的经济指标，每天展示最新的）
+        macro_data = None
+        if news_path.exists():
+            all_news = pd.read_csv(news_path, parse_dates=["timestamp"])
+            macro_data = all_news[all_news["source"] == "macro"].copy()
+            if not macro_data.empty:
+                macro_data.set_index("timestamp", inplace=True)
+                macro_data.sort_index(inplace=True)
+                logger.info(f"加载宏观数据: {len(macro_data)} 条")
+            else:
+                logger.warning("新闻数据中未找到宏观数据")
+        else:
+            logger.warning(f"新闻数据文件不存在，无法加载宏观数据")
+
         # 数据聚合：将多源新闻聚合为每日决策
         logger.info("数据聚合: 将多源新闻聚合为每日决策...")
         daily_news = DataAligner.aggregate_daily_news(
@@ -820,24 +970,169 @@ def cache_build(
         )
         logger.info(f"聚合完成: {len(news_data)} 条 → {len(daily_news)} 天")
 
-        # 交易日过滤
+        # 交易日过滤 + 非交易日新闻合并
+        # 关键：将周末和假期的新闻合并到下一个交易日
         if ohlcv_data is not None:
-            trading_days = set(ohlcv_data.index.normalize())
-            daily_news = daily_news[
-                daily_news["timestamp"].dt.normalize().isin(trading_days)
-            ]
-            logger.info(f"交易日过滤后: {len(daily_news)} 天")
+            trading_days = ohlcv_data.index.normalize()
+            daily_news = DataAligner.merge_non_trading_news_to_trading_days(
+                daily_news,
+                trading_days=trading_days,
+            )
+            logger.info(f"交易日过滤+合并后: {len(daily_news)} 天")
+
+        # ====================================================================
+        # 关键修正：时间对齐 + 添加价格数据
+        # ====================================================================
+        logger.info("时间对齐修正：使用T-1的新闻和价格做T的决策")
+
+        # 准备OHLCV数据字典（用于快速查询）
+        ohlcv_dict = {}
+        if ohlcv_data is not None:
+            for idx, row in ohlcv_data.iterrows():
+                ohlcv_dict[idx] = row
+
+        # 为每一天生成market_context（包含昨日价格数据）
+        enhanced_news_list = []
+
+        for i, news_record in enumerate(daily_news.to_dict("records")):
+            # daily_news的timestamp是新闻日期（T-1日）
+            # trading_day是交易日T（决策日）
+            # 需要获取T-1日的OHLCV数据，做出T日的决策
+            news_date = pd.to_datetime(news_record["timestamp"])  # T-1 新闻日期
+            trading_day_T = pd.to_datetime(news_record.get("trading_day", news_record["timestamp"]))  # T 决策日
+
+            # 获取新闻日期（T-1日）的OHLCV数据
+            # 由于新闻日期可能不是交易日，需要向前查找最近的交易日
+            t_minus_1 = None
+            if news_date in ohlcv_dict:
+                t_minus_1 = news_date  # 新闻日期本身就是交易日
+            else:
+                # 向前查找最近的交易日（最多回溯15天）
+                for days_back in range(1, 16):
+                    candidate_day = news_date - pd.Timedelta(days=days_back)
+                    if candidate_day in ohlcv_dict:
+                        t_minus_1 = candidate_day
+                        break
+
+            # 决策日期是交易日T日（从trading_day获取）
+            decision_date = trading_day_T
+
+            # 如果找不到T-1的OHLCV数据，只传新闻（仅适用于数据集第一天等特殊情况）
+            if t_minus_1 is None:
+                logger.warning(f"{trading_day_T.date()}: 无T-1日价格数据，仅使用新闻做决策")
+                market_context = f"""### T-1日市场数据
+- 日期: 无历史价格数据
+- 注: 当前为T日({trading_day_T.date()})，因无T-1日价格数据，仅基于新闻做决策"""
+                enhanced_record = news_record.copy()
+                enhanced_record["market_context"] = market_context
+                enhanced_record["timestamp"] = decision_date
+                enhanced_record["ohlcv_date"] = None  # 无OHLCV数据
+                enhanced_news_list.append(enhanced_record)
+                continue
+
+            # 获取T-1的OHLCV数据（昨日收盘数据）
+            t_minus_1_ohlcv = ohlcv_dict[t_minus_1]
+
+            # 获取T-1的北向资金数据（如果T-1没有，也像OHLCV一样向前查找最多15天）
+            # 注意：北向资金在A股长假期间可能仍有数据（港股开市），需要查找更多天数
+            northbound_info = ""
+            if northbound_data is not None:
+                nb_date = None
+                # 如果T-1没有北向资金数据，向前查找最多15天（与OHLCV一致）
+                for days_back in range(0, 16):
+                    check_date = t_minus_1 - pd.Timedelta(days=days_back)
+                    if check_date in northbound_data.index:
+                        nb = northbound_data.loc[check_date]
+                        nb_date = check_date
+                        break
+                else:
+                    nb = None
+
+                if nb is not None:
+                    flow_value = nb.get('net_inflow', 'N/A')
+                    if pd.notna(flow_value):
+                        date_note = f"({nb_date.date()})" if nb_date != t_minus_1 else ""
+                        northbound_info = f"\n- 北向资金{date_note}: 净流入 {flow_value:.2f} 亿元"
+
+            # 获取最新的宏观数据（<= T-1的最新发布，避免未来函数）
+            macro_info = ""
+            if macro_data is not None and not macro_data.empty:
+                # 查找 <= t_minus_1 的最新宏观数据
+                available_macros = macro_data[macro_data.index <= t_minus_1]
+                if not available_macros.empty:
+                    # 获取最近的几条宏观数据（每种类型取最新）
+                    latest_macros = []
+                    # 按类型分组，取每种类型的最新一条
+                    for title, group in available_macros.groupby('title'):
+                        latest = group.iloc[-1]  # 最新的
+                        publish_date = group.index[-1]
+                        date_note = f"({publish_date.date()})"
+                        content_short = str(latest.get('content', ''))[:50] + "..." if len(str(latest.get('content', ''))) > 50 else str(latest.get('content', ''))
+                        latest_macros.append(f"- {title}{date_note}: {content_short}")
+
+                    if latest_macros:
+                        macro_info = "\n- 宏观数据:\n" + "\n".join(latest_macros[:3])  # 最多显示3条
+
+            # 构建market_context（Markdown格式，匹配新闻格式）
+            market_context = f"""### T-1日市场数据
+- 日期: {t_minus_1.date()}
+- 收盘价: {t_minus_1_ohlcv['close']:.2f} (涨跌幅: {(t_minus_1_ohlcv['close'] - t_minus_1_ohlcv['open']) / t_minus_1_ohlcv['open'] * 100:.2f}%)
+- 波动率: {(t_minus_1_ohlcv['high'] - t_minus_1_ohlcv['low']) / t_minus_1_ohlcv['close'] * 100:.2f}%
+- 成交量: {t_minus_1_ohlcv['volume']:,.0f}{northbound_info}{macro_info}
+
+注: 当前为T日({trading_day_T.date()})，使用T-1日数据做今日决策"""
+
+            # 创建增强的新闻记录
+            enhanced_record = news_record.copy()
+            enhanced_record["market_context"] = market_context
+            # 缓存中的timestamp是决策日期（T日），回测系统会根据这个日期执行交易
+            enhanced_record["timestamp"] = decision_date
+            enhanced_record["ohlcv_date"] = t_minus_1  # T-1日（OHLCV数据日期）
+
+            enhanced_news_list.append(enhanced_record)
+
+        logger.info(f"有效决策点: {len(enhanced_news_list)} 天（跳过第一天的无数据情况）")
+
+        # ====================================================================
 
         # 确定模型
         if model is None:
             if executor == "siliconflow":
                 model = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
             elif executor == "deepseek":
-                model = "deepseek-chat"
+                model = "deepseek-reasoner"  # 使用推理模型
             else:
                 model = "qwen2.5:7b"
 
         logger.info(f"使用模型: {model}")
+
+        # 根据模型名称生成缓存文件名
+        # 提取模型标识：deepseek-official, deepseek-14b, deepseek-8b
+        if "deepseek-reasoner" in model or model == "deepseek-chat":
+            model_tag = "deepseek_official"
+        elif "DeepSeek-R1-Distill-Qwen-14B" in model:
+            model_tag = "deepseek_14b"
+        elif "DeepSeek-R1-0528-Qwen3-8B" in model:
+            model_tag = "deepseek_8b"
+        else:
+            model_tag = executor
+
+        cache_file = output_path / f"llm_cache_{symbol}_{model_tag}.jsonl"
+        logger.info(f"缓存文件: {cache_file}")
+
+        # 根据模型名称生成缓存文件名
+        # 提取模型标识：deepseek-official, deepseek-14b, deepseek-8b
+        if "deepseek-reasoner" in model or model == "deepseek-chat":
+            model_tag = "deepseek_official"
+        elif "DeepSeek-R1-Distill-Qwen-14B" in model:
+            model_tag = "deepseek_14b"
+        elif "DeepSeek-R1-0528-Qwen3-8B" in model:
+            model_tag = "deepseek_8b"
+        else:
+            model_tag = executor
+
+        cache_file = output_path / f"llm_cache_{symbol}_{model_tag}.jsonl"
+        logger.info(f"缓存文件: {cache_file}")
 
         # 初始化 LLM Agent
         llm_agent = LLMTradingAgent(executor_type=executor, model=model)
@@ -848,7 +1143,7 @@ def cache_build(
             logger.info(f"已加载 {len(llm_agent._cache)} 条缓存，将跳过已处理的日期")
 
         # 转换为新闻列表格式
-        news_list = daily_news.to_dict("records")
+        news_list = enhanced_news_list
 
         if not news_list:
             logger.warning("无新闻数据需要处理")
@@ -860,7 +1155,7 @@ def cache_build(
         start_time = time.time()
         signals = llm_agent.batch_analyze(
             news_list=news_list,
-            market_context="当前市场正常运行。",
+            market_context="",  # 在news_list中已包含market_context
             symbol=symbol,
             cache_path=cache_file,  # 传入缓存路径以支持追加模式
         )
