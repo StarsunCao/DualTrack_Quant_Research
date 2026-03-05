@@ -2,7 +2,7 @@
 """
 DualTrack Quant Research - CLI 主入口。
 
-五轨道对比实验测试平台 (Testbed)：
+六轨道对比实验测试平台 (Testbed)：
 - LR Track: Logistic Regression (线性基线)
 - LSTM Track: 序列建模
 - LightGBM Track: 集成学习
@@ -20,7 +20,7 @@ Usage:
     python main.py cache-build
 
 子命令:
-    run:         执行五轨道对比实验
+    run:         执行六轨道对比实验
     evaluate:    重新生成评估图表
     cache-build: 构建 LLM 离线缓存
 """
@@ -59,16 +59,17 @@ logger = get_logger(__name__)
 @click.pass_context
 def cli(ctx: click.Context, verbose: bool) -> None:
     """
-    DualTrack Quant Research - 五轨道对比实验测试平台。
+    DualTrack Quant Research - 六轨道对比实验测试平台。
 
     项目目标：建立公平的"竞技场"，在相同市场条件下对比五种量化技术。
 
-    五轨道设计：
+    六轨道设计：
       - LR: Logistic Regression（线性基线）
       - LSTM: 序列建模（时序特性）
       - LightGBM: 集成学习（树模型）
-      - LLM(Cloud): 云端智能（DeepSeek API）
-      - LLM(Local): 本地智能（Ollama）
+      - LLM(Cloud): 云端智能（DeepSeek 官方API）
+      - LLM(Local-14B): 本地智能（DeepSeek R1 14B via SiliconFlow）
+      - LLM(Local-8B): 本地智能（DeepSeek R1 8B via SiliconFlow）
 
     核心假设：
       - H1: ML Tracks（拟合）vs LLM Tracks（推理）：哪种范式更优？
@@ -90,12 +91,12 @@ def cli(ctx: click.Context, verbose: bool) -> None:
               default="all",
               help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, llm-cloud=DeepSeek官方, llm-local-14b=SiliconFlow14B, llm-local-8b=SiliconFlow8B, all=全部")
 @click.option("--symbol", "-s", default="CSI300", help="交易标的 (CSI300/QQQ)")
-@click.option("--start", default="2026-01-09", help="回测开始日期")
-@click.option("--end", default="2026-02-28", help="回测结束日期")
+@click.option("--start", default="2020-01-02", help="回测开始日期")
+@click.option("--end", default="2024-12-31", help="回测结束日期")
 @click.option("--initial-cash", default=100000.0, help="初始资金")
 @click.option("--commission", default=0.0002, help="佣金率")
 @click.option("--output-dir", default="docs/output", help="输出目录")
-@click.option("--compare", "-c", is_flag=True, help="生成五轨道对比分析报告")
+@click.option("--compare", "-c", is_flag=True, help="生成六轨道对比分析报告")
 @click.pass_context
 def run_backtest(
     ctx: click.Context,
@@ -109,9 +110,9 @@ def run_backtest(
     compare: bool,
 ) -> None:
     """
-    执行五轨道对比实验。
+    执行六轨道对比实验。
 
-    五轨道设计:
+    六轨道设计:
       - lr: Logistic Regression (线性基线)
       - lstm: LSTM (序列建模)
       - lgb: LightGBM (集成学习)
@@ -134,7 +135,7 @@ def run_backtest(
     verbose = ctx.obj.get("verbose", False)
 
     click.echo("=" * 70)
-    click.echo("  DualTrack Quant - 五轨道对比实验测试平台")
+    click.echo("  DualTrack Quant - 六轨道对比实验测试平台")
     click.echo("=" * 70)
     click.echo(f"  选择轨道: {track}")
     click.echo(f"  标的: {symbol}")
@@ -168,7 +169,14 @@ def run_backtest(
         if date_range_days > 400:  # 超过1年，使用5年数据
             real_data_path = Path(f"data/raw/real_{symbol.lower()}_5y.csv")
         else:
-            real_data_path = Path(f"data/raw/real_{symbol.lower()}_1y.csv")
+            # 优先使用5年数据（匹配LLM缓存2020-2024），如果没有则使用1年数据
+            real_data_path_5y = Path(f"data/raw/real_{symbol.lower()}_5y.csv")
+            real_data_path_1y = Path(f"data/raw/real_{symbol.lower()}_1y.csv")
+
+            if real_data_path_5y.exists():
+                real_data_path = real_data_path_5y
+            else:
+                real_data_path = real_data_path_1y
 
         if real_data_path.exists():
             click.echo(f"  使用真实 OHLCV 数据: {real_data_path}")
@@ -231,10 +239,10 @@ def run_backtest(
         aligned_data = {"ohlcv": ohlcv_data, "news": pd.DataFrame()}
 
     # ================================================================
-    # Phase 2-3: 五轨道信号生成
+    # Phase 2-3: 六轨道信号生成
     # ================================================================
 
-    确定要运行的轨道
+    # 确定要运行的轨道
     tracks_to_run = []
     if track == "all":
         tracks_to_run = ["lr", "lstm", "lgb", "llm-cloud", "llm-local-14b", "llm-local-8b"]
@@ -537,7 +545,7 @@ def run_backtest(
     # ================================================================
     click.echo("\n[Phase 4] 信号转换 (独立运行，不融合)...")
 
-    from src.orchestrator.fusion_engine import SignalConverter
+    from src.orchestrator.signal_converter import SignalConverter
 
     # ML Tracks 信号转换
     for track_name in ["lr", "lstm", "lgb"]:
@@ -564,9 +572,9 @@ def run_backtest(
                 click.echo(f"  ⚠️ {track_name.upper()} 信号转换失败: {e}")
 
     # ================================================================
-    # Phase 5: 五轨道独立回测
+    # Phase 5: 六轨道独立回测
     # ================================================================
-    click.echo("\n[Phase 5] 五轨道独立回测...")
+    click.echo("\n[Phase 5] 六轨道独立回测...")
 
     from src.execution.bt_engine import BacktestEngine, DualTrackStrategy
 
@@ -668,19 +676,19 @@ def run_backtest(
 
                 equity_curves[track_name.upper()] = result.equity_curve
 
-        # 生成五轨道对比图表
+        # 生成六轨道对比图表
         if equity_curves:
             plot_equity_curves(
                 equity_curves,
                 title=f"Five-Track Comparison: {symbol}",
                 save_path=str(output_path / f"equity_curves_{symbol}.png"),
             )
-            click.echo(f"\n  ✅ 五轨道对比图表已保存: {output_path / f'equity_curves_{symbol}.png'}")
+            click.echo(f"\n  ✅ 六轨道对比图表已保存: {output_path / f'equity_curves_{symbol}.png'}")
 
-        # 五轨道对比分析报告
+        # 六轨道对比分析报告
         if compare and len(track_metrics) > 1:
             click.echo("\n" + "=" * 70)
-            click.echo("  【五轨道对比分析】")
+            click.echo("  【六轨道对比分析】")
             click.echo("=" * 70)
 
             # 构建对比表格
@@ -755,7 +763,7 @@ def run_backtest(
 
     # 显示各轨道结果汇总
     if track_results:
-        click.echo(f"\n  📊 五轨道回测结果汇总:")
+        click.echo(f"\n  📊 六轨道回测结果汇总:")
         click.echo(f"  ┌──────────────┬────────────┬────────────┬────────────┬────────────┐")
         click.echo(f"  │     轨道     │   最终资产  │   总收益率  │   夏普比率  │   最大回撤  │")
         click.echo(f"  ├──────────────┼────────────┼────────────┼────────────┼────────────┤")
@@ -1050,7 +1058,7 @@ def cache_build(
 
                 if nb is not None:
                     flow_value = nb.get('net_inflow', 'N/A')
-                    if pd.notna(flow_value):
+                    if pd.notna(flow_value) and isinstance(flow_value, (int, float)):
                         date_note = f"({nb_date.date()})" if nb_date != t_minus_1 else ""
                         northbound_info = f"\n- 北向资金{date_note}: 净流入 {flow_value:.2f} 亿元"
 

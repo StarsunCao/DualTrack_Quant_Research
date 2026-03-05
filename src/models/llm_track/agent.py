@@ -918,7 +918,7 @@ class LLMTradingAgent:
             results.append({
                 "timestamp": ts,
                 "symbol": cache_entry.symbol,
-                "llm_signal": cache_entry.signal,
+                "signal": cache_entry.signal,  # 使用signal列名（与缓存文件一致）
                 "reasoning": cache_entry.reasoning,
                 "latency_ms": cache_entry.latency_ms,
                 "confidence": cache_entry.confidence,

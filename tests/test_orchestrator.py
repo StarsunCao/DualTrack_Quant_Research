@@ -18,6 +18,7 @@ import pandas as pd
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.orchestrator.signal_converter import SignalConverter
 from src.orchestrator.fusion_engine import (
     SignalFusionEngine,
     TargetPosition,

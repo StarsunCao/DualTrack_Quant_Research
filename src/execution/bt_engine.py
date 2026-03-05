@@ -494,7 +494,7 @@ class DualTrackStrategy(bt.Strategy):
                 }
                 self.rebalance_records.append(rebalance_record)
 
-        # 执行调仓
+        # 执行调仓（A股规则：禁止做空）
         self.log(f"执行调仓, 目标仓位: {target}")
 
         # 对每个数据源进行调仓
@@ -503,6 +503,12 @@ class DualTrackStrategy(bt.Strategy):
 
             if symbol in target:
                 weight = target[symbol]
+
+                # A股规则：禁止做空，负权重限制为0
+                if weight < 0:
+                    self.log(f"  ⚠️ {symbol}: 做空信号 {weight:.2%} 已限制为0（A股禁止做空）")
+                    weight = 0.0
+
                 self.log(f"  {symbol}: 调整仓位至 {weight:.2%}")
                 self.order_target_percent(data=data, target=weight)
             else:
