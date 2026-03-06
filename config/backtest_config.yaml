@@ -53,8 +53,9 @@ multi_track:
     - "lr"
     - "lstm"
     - "lgb"
-    - "llm-cloud"
-    - "llm-local"
+    - "deepseek-v3"
+    - "deepseek-r1-14b"
+    - "deepseek-r1-8b"
 
   # 信号融合配置（独立运行时不使用）
   fusion:

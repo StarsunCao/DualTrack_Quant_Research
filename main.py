@@ -14,8 +14,8 @@ Usage:
     python main.py run --track lr --symbol CSI300
     python main.py run --track lstm --symbol CSI300
     python main.py run --track lgb --symbol CSI300
-    python main.py run --track llm-cloud --symbol CSI300
-    python main.py run --track llm-local --symbol CSI300
+    python main.py run --track deepseek-v3 --symbol CSI300
+    python main.py run --track deepseek-r1-14b --symbol CSI300
     python main.py evaluate
     python main.py cache-build
 
@@ -67,9 +67,9 @@ def cli(ctx: click.Context, verbose: bool) -> None:
       - LR: Logistic Regression（线性基线）
       - LSTM: 序列建模（时序特性）
       - LightGBM: 集成学习（树模型）
-      - LLM(Cloud): 云端智能（DeepSeek 官方API）
-      - LLM(Local-14B): 本地智能（DeepSeek R1 14B via SiliconFlow）
-      - LLM(Local-8B): 本地智能（DeepSeek R1 8B via SiliconFlow）
+      - DeepSeek V3: DeepSeek V3.2（官方API）
+      - DeepSeek R1 14B: DeepSeek R1 14B (SiliconFlow)
+      - DeepSeek R1 8B: DeepSeek R1 8B (SiliconFlow)
 
     核心假设：
       - H1: ML Tracks（拟合）vs LLM Tracks（推理）：哪种范式更优？
@@ -87,13 +87,13 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 # ============================================================================
 @cli.command("run")
 @click.option("--track", "-t",
-              type=click.Choice(["lr", "lstm", "lgb", "llm-cloud", "llm-local-14b", "llm-local-8b", "all"]),
+              type=click.Choice(["lr", "lstm", "lgb", "deepseek-v3", "deepseek-r1-14b", "deepseek-r1-8b", "all"]),
               default="all",
-              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, llm-cloud=DeepSeek官方, llm-local-14b=SiliconFlow14B, llm-local-8b=SiliconFlow8B, all=全部")
+              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, deepseek-v3=DeepSeek V3, deepseek-r1-14b=DeepSeek R1 14B, deepseek-r1-8b=DeepSeek R1 8B, all=全部")
 @click.option("--symbol", "-s", default="CSI300", help="交易标的 (CSI300/QQQ)")
 @click.option("--start", default="2020-01-02", help="回测开始日期")
 @click.option("--end", default="2024-12-31", help="回测结束日期")
-@click.option("--initial-cash", default=100000.0, help="初始资金")
+@click.option("--initial-cash", default=1000000.0, help="初始资金")
 @click.option("--commission", default=0.0002, help="佣金率")
 @click.option("--output-dir", default="docs/output", help="输出目录")
 @click.option("--compare", "-c", is_flag=True, help="生成六轨道对比分析报告")
@@ -116,9 +116,10 @@ def run_backtest(
       - lr: Logistic Regression (线性基线)
       - lstm: LSTM (序列建模)
       - lgb: LightGBM (集成学习)
-      - llm-cloud: 云端 LLM (DeepSeek API)
-      - llm-local: 本地 LLM (Ollama)
-      - all: 同时运行全部五个轨道
+      - deepseek-v3: DeepSeek V3 (官方API)
+      - deepseek-r1-14b: DeepSeek R1 14B (SiliconFlow)
+      - deepseek-r1-8b: DeepSeek R1 8B (SiliconFlow)
+      - all: 同时运行全部六个轨道
 
     实验设计:
       - Exp-1: LR vs LSTM vs LightGBM (哪种ML模型最适合量化?)
@@ -245,7 +246,7 @@ def run_backtest(
     # 确定要运行的轨道
     tracks_to_run = []
     if track == "all":
-        tracks_to_run = ["lr", "lstm", "lgb", "llm-cloud", "llm-local-14b", "llm-local-8b"]
+        tracks_to_run = ["lr", "lstm", "lgb", "deepseek-v3", "deepseek-r1-14b", "deepseek-r1-8b"]
     else:
         tracks_to_run = [track]
 
@@ -492,86 +493,89 @@ def run_backtest(
             click.echo(f"  ⚠️ LightGBM 失败，使用模拟信号: {e}")
             track_signals["lgb"] = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道4: LLM(Cloud) - 官方DeepSeek R1
-    if "llm-cloud" in tracks_to_run:
-        click.echo("\n[轨道 4/6] LLM(Cloud) - DeepSeek官方 信号生成...")
+    # 轨道4: DeepSeek V3
+    if "deepseek-v3" in tracks_to_run:
+        click.echo("\n[轨道 4/6] DeepSeek V3 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
-            # 使用官方DeepSeek缓存
-            cache_path_deepseek_official = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_official.jsonl")
+            # 使用DeepSeek V3.2缓存
+            cache_path_deepseek_v3 = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_v3.jsonl")
 
-            if cache_path_deepseek_official.exists():
-                llm_cloud_agent = LLMTradingAgent(executor_type="deepseek", model="deepseek-reasoner")
-                llm_cloud_agent._load_cache(cache_path_deepseek_official)
-                click.echo(f"  使用DeepSeek官方缓存: {cache_path_deepseek_official}")
-                llm_cloud_signals = llm_cloud_agent.get_signals_from_cache(symbol=symbol)
+            if cache_path_deepseek_v3.exists():
+                llm_v3_agent = LLMTradingAgent(
+                    executor_type="siliconflow",
+                    model="deepseek-ai/DeepSeek-V3.2"
+                )
+                llm_v3_agent._load_cache(cache_path_deepseek_v3)
+                click.echo(f"  使用DeepSeek V3缓存: {cache_path_deepseek_v3}")
+                llm_v3_signals = llm_v3_agent.get_signals_from_cache(symbol=symbol)
             else:
-                click.echo(f"  ⚠️ 未找到DeepSeek官方缓存: {cache_path_deepseek_official}")
-                click.echo(f"  请先运行: python main.py cache-build --executor deepseek --symbol {symbol}")
-                llm_cloud_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+                click.echo(f"  ⚠️ 未找到DeepSeek V3缓存: {cache_path_deepseek_v3}")
+                click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model deepseek-ai/DeepSeek-V3.2 --symbol {symbol}")
+                llm_v3_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-            track_signals["llm-cloud"] = llm_cloud_signals
-            click.echo(f"  ✅ LLM(Cloud) 信号: {len(llm_cloud_signals)} 条")
+            track_signals["deepseek-v3"] = llm_v3_signals
+            click.echo(f"  ✅ DeepSeek V3 信号: {len(llm_v3_signals)} 条")
         except Exception as e:
-            click.echo(f"  ⚠️ LLM(Cloud) 失败，使用模拟信号: {e}")
-            track_signals["llm-cloud"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+            click.echo(f"  ⚠️ DeepSeek V3 失败，使用模拟信号: {e}")
+            track_signals["deepseek-v3"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道5: LLM(Local 14B) - DeepSeek 14B
-    if "llm-local-14b" in tracks_to_run:
-        click.echo("\n[轨道 5/6] LLM(Local 14B) - DeepSeek R1 14B 信号生成...")
+    # 轨道5: DeepSeek R1 14B
+    if "deepseek-r1-14b" in tracks_to_run:
+        click.echo("\n[轨道 5/6] DeepSeek R1 14B 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
-            # 使用DeepSeek 14B缓存
-            cache_path_deepseek_14b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_14b.jsonl")
+            # 使用DeepSeek R1 14B缓存
+            cache_path_deepseek_14b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_r1_14b.jsonl")
 
             if cache_path_deepseek_14b.exists():
-                llm_local_14b_agent = LLMTradingAgent(
+                llm_r1_14b_agent = LLMTradingAgent(
                     executor_type="siliconflow",
                     model="deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
                 )
-                llm_local_14b_agent._load_cache(cache_path_deepseek_14b)
-                click.echo(f"  使用DeepSeek 14B缓存: {cache_path_deepseek_14b}")
-                llm_local_14b_signals = llm_local_14b_agent.get_signals_from_cache(symbol=symbol)
+                llm_r1_14b_agent._load_cache(cache_path_deepseek_14b)
+                click.echo(f"  使用DeepSeek R1 14B缓存: {cache_path_deepseek_14b}")
+                llm_r1_14b_signals = llm_r1_14b_agent.get_signals_from_cache(symbol=symbol)
             else:
-                click.echo(f"  ⚠️ 未找到DeepSeek 14B缓存: {cache_path_deepseek_14b}")
+                click.echo(f"  ⚠️ 未找到DeepSeek R1 14B缓存: {cache_path_deepseek_14b}")
                 click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model deepseek-ai/DeepSeek-R1-Distill-Qwen-14B --symbol {symbol}")
-                llm_local_14b_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+                llm_r1_14b_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-            track_signals["llm-local-14b"] = llm_local_14b_signals
-            click.echo(f"  ✅ LLM(Local 14B) 信号: {len(llm_local_14b_signals)} 条")
+            track_signals["deepseek-r1-14b"] = llm_r1_14b_signals
+            click.echo(f"  ✅ DeepSeek R1 14B 信号: {len(llm_r1_14b_signals)} 条")
         except Exception as e:
-            click.echo(f"  ⚠️ LLM(Local 14B) 失败，使用模拟信号: {e}")
-            track_signals["llm-local-14b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+            click.echo(f"  ⚠️ DeepSeek R1 14B 失败，使用模拟信号: {e}")
+            track_signals["deepseek-r1-14b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道6: LLM(Local 8B) - DeepSeek 8B
-    if "llm-local-8b" in tracks_to_run:
-        click.echo("\n[轨道 6/6] LLM(Local 8B) - DeepSeek R1 8B 信号生成...")
+    # 轨道6: DeepSeek R1 8B
+    if "deepseek-r1-8b" in tracks_to_run:
+        click.echo("\n[轨道 6/6] DeepSeek R1 8B 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
-            # 使用DeepSeek 8B缓存
-            cache_path_deepseek_8b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_8b.jsonl")
+            # 使用DeepSeek R1 8B缓存
+            cache_path_deepseek_8b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_r1_8b.jsonl")
 
             if cache_path_deepseek_8b.exists():
-                llm_local_8b_agent = LLMTradingAgent(
+                llm_r1_8b_agent = LLMTradingAgent(
                     executor_type="siliconflow",
                     model="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
                 )
-                llm_local_8b_agent._load_cache(cache_path_deepseek_8b)
-                click.echo(f"  使用DeepSeek 8B缓存: {cache_path_deepseek_8b}")
-                llm_local_8b_signals = llm_local_8b_agent.get_signals_from_cache(symbol=symbol)
+                llm_r1_8b_agent._load_cache(cache_path_deepseek_8b)
+                click.echo(f"  使用DeepSeek R1 8B缓存: {cache_path_deepseek_8b}")
+                llm_r1_8b_signals = llm_r1_8b_agent.get_signals_from_cache(symbol=symbol)
             else:
-                click.echo(f"  ⚠️ 未找到DeepSeek 8B缓存: {cache_path_deepseek_8b}")
+                click.echo(f"  ⚠️ 未找到DeepSeek R1 8B缓存: {cache_path_deepseek_8b}")
                 click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model deepseek-ai/DeepSeek-R1-0528-Qwen3-8B --symbol {symbol}")
-                llm_local_8b_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+                llm_r1_8b_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-            track_signals["llm-local-8b"] = llm_local_8b_signals
-            click.echo(f"  ✅ LLM(Local 8B) 信号: {len(llm_local_8b_signals)} 条")
+            track_signals["deepseek-r1-8b"] = llm_r1_8b_signals
+            click.echo(f"  ✅ DeepSeek R1 8B 信号: {len(llm_r1_8b_signals)} 条")
         except Exception as e:
-            click.echo(f"  ⚠️ LLM(Local 8B) 失败，使用模拟信号: {e}")
-            track_signals["llm-local-8b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+            click.echo(f"  ⚠️ DeepSeek R1 8B 失败，使用模拟信号: {e}")
+            track_signals["deepseek-r1-8b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
     # ================================================================
     # Phase 4: 信号转换 (独立运行，不融合！)
@@ -593,16 +597,16 @@ def run_backtest(
                 click.echo(f"  ⚠️ {track_name.upper()} 信号转换失败: {e}")
 
     # LLM Tracks 信号转换
-    for track_name in ["llm-cloud", "llm-local-14b", "llm-local-8b"]:
+    for track_name in ["deepseek-v3", "deepseek-r1-14b", "deepseek-r1-8b"]:
         if track_name in track_signals:
             try:
                 track_positions[track_name] = SignalConverter.llm_signals_to_positions(
                     track_signals[track_name],
                     ohlcv_dates=ohlcv_data.index
                 )
-                click.echo(f"  ✅ {track_name.upper()} 仓位: {len(track_positions[track_name])} 个时间点")
+                click.echo(f"  ✅ {track_name} 仓位: {len(track_positions[track_name])} 个时间点")
             except Exception as e:
-                click.echo(f"  ⚠️ {track_name.upper()} 信号转换失败: {e}")
+                click.echo(f"  ⚠️ {track_name} 信号转换失败: {e}")
 
     # ================================================================
     # Phase 5: 六轨道独立回测
@@ -755,7 +759,7 @@ def run_backtest(
 
             # H1: ML vs LLM
             ml_tracks = {k: v for k, v in track_metrics.items() if k in ['lr', 'lstm', 'lgb']}
-            llm_tracks = {k: v for k, v in track_metrics.items() if k in ['llm-cloud', 'llm-local']}
+            llm_tracks = {k: v for k, v in track_metrics.items() if 'deepseek' in k}
 
             if ml_tracks and llm_tracks:
                 best_ml = max(ml_tracks.items(), key=lambda x: x[1].financial_metrics.sharpe_ratio)

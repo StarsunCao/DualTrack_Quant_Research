@@ -12,18 +12,18 @@ executors:
     temperature: 0.7
     max_tokens: 1024
 
-  deepseek-official:
-    name: "DeepSeek Official"
-    description: "官方DeepSeek R1 API (推理模式)"
+  deepseek-v3:
+    name: "DeepSeek V3"
+    description: "DeepSeek V3.2 (通过SiliconFlow API)"
     type: "cloud"
-    model: "deepseek-reasoner"  # 使用推理模型，而非deepseek-chat
-    base_url: "https://api.deepseek.com/v1"
+    model: "deepseek-ai/DeepSeek-V3.2"
+    base_url: "https://api.siliconflow.cn/v1"
     timeout: 120
     temperature: 0.7
-    max_tokens: 4096  # 推理模型需要更多token
-    # API Key 从环境变量读取: DEEPSEEK_API_KEY
+    max_tokens: 4096
+    # API Key 从环境变量读取: SILICONFLOW_API_KEY
 
-  deepseek-14b:
+  deepseek-r1-14b:
     name: "DeepSeek R1 14B"
     description: "DeepSeek R1 14B (通过SiliconFlow API)"
     type: "cloud"
@@ -34,7 +34,7 @@ executors:
     max_tokens: 2048
     # API Key 从环境变量读取: SILICONFLOW_API_KEY
 
-  deepseek-8b:
+  deepseek-r1-8b:
     name: "DeepSeek R1 8B"
     description: "DeepSeek R1 8B (通过SiliconFlow API)"
     type: "cloud"
