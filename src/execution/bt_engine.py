@@ -504,10 +504,16 @@ class DualTrackStrategy(bt.Strategy):
             if symbol in target:
                 weight = target[symbol]
 
-                # A股规则：禁止做空，负权重限制为0
+                # A股规则：SELL信号（负权重）→ 分级减仓而非清仓
                 if weight < 0:
-                    self.log(f"  ⚠️ {symbol}: 做空信号 {weight:.2%} 已限制为0（A股禁止做空）")
-                    weight = 0.0
+                    # 负权重转换为"保留仓位"
+                    # weight = -0.95 → 保留仓位 = 1 + (-0.95) = 0.05 (5%)
+                    # weight = -0.70 → 保留仓位 = 1 + (-0.70) = 0.30 (30%)
+                    # 置信度越高，保留仓位越少（减仓越多）
+                    target_weight = 1 + weight  # 负权重转正
+                    target_weight = max(0.0, target_weight)  # 确保非负
+                    self.log(f"  {symbol}: SELL信号 {weight:.2%} → 保留仓位 {target_weight:.2%}（减仓{-weight:.2%}）")
+                    weight = target_weight
 
                 self.log(f"  {symbol}: 调整仓位至 {weight:.2%}")
                 self.order_target_percent(data=data, target=weight)

@@ -130,8 +130,34 @@ class SignalConverter:
         if daily_df.empty:
             return positions
 
-        # 3. 转换为权重
-        daily_df['weight'] = daily_df['signal'].map(signal_map) * daily_df['confidence']
+        # 3. A股不对称仓位映射（核心修复）
+        # BUY: weight = confidence（按置信度建仓）
+        # HOLD: 不产生目标仓位（保持现状）
+        # SELL: weight = -confidence（将在bt_engine中处理为减仓）
+
+        def signal_to_weight(signal: str, confidence: float) -> float:
+            """
+            A股不对称仓位映射。
+
+            Args:
+                signal: 信号类型 (buy/sell/hold)
+                confidence: 置信度 (0.0-1.0)
+
+            Returns:
+                目标权重（hold返回None，表示不调整仓位）
+            """
+            if signal == "buy":
+                return confidence  # BUY: 置信度决定仓位
+            elif signal == "sell":
+                return -confidence  # SELL: 负权重，将在引擎中转换为减仓
+            else:  # hold
+                return None  # HOLD: 不产生目标仓位，保持现状
+
+        # 应用映射
+        daily_df['weight'] = daily_df.apply(
+            lambda row: signal_to_weight(row['signal'], row['confidence']),
+            axis=1
+        )
 
         # ====================================================================
         # 关键修正：时间对齐
@@ -145,17 +171,21 @@ class SignalConverter:
             aligned = align_to_trading_days(daily_df, ohlcv_dates)
 
             if not aligned.empty:
+                # 过滤掉HOLD信号（weight为NaN），只保留BUY和SELL信号
+                # HOLD信号不产生目标仓位，回测引擎会自动保持当前持仓
                 positions = {
                     row['timestamp']: {row['symbol']: row['weight']}
                     for _, row in aligned.iterrows()
+                    if pd.notna(row['weight'])  # 使用pd.notna()过滤NaN（HOLD信号）
                 }
 
-            # 填充缺失交易日（使用前向填充）
-            symbol = daily_df['symbol'].iloc[0] if 'symbol' in daily_df.columns else "CSI300"
-            positions = fill_missing_trading_days(positions, ohlcv_dates, default_weight=0.0, symbol=symbol)
+            # ⚠️ 关键修改：不填充缺失交易日
+            # 让回测引擎自己处理：如果某天没有目标仓位，就保持当前持仓
+            # 这才是HOLD信号的正确含义："保持现状"
         else:
             # 不对齐，直接使用信号日期（决策日期）
             for _, row in daily_df.iterrows():
-                positions[row['timestamp']] = {row['symbol']: row['weight']}
+                if pd.notna(row['weight']):  # 使用pd.notna()过滤NaN（HOLD信号）
+                    positions[row['timestamp']] = {row['symbol']: row['weight']}
 
         return positions

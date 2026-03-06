@@ -259,11 +259,44 @@ def run_backtest(
     features_df = None
     if any(t in tracks_to_run for t in ["lr", "lstm", "lgb"]):
         click.echo("\n[Phase 2] 特征工程 (ML Tracks 共用)...")
+
         try:
             from src.models.ml_track.features import FeatureEngineer
-            feature_engineer = FeatureEngineer()
-            features_df = feature_engineer.compute_all_features(aligned_data["ohlcv"])
-            click.echo(f"  ✅ 特征计算: {features_df.shape[1]} 个因子")
+
+            # ====================================================================
+            # 关键修复：使用扩展的历史数据避免前60天特征缺失
+            # ====================================================================
+            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            if train_data_path.exists():
+                click.echo("  加载历史数据（2019年）避免特征窗口损失...")
+                historical_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
+                historical_ohlcv.set_index("date", inplace=True)
+
+                # 只使用2019年的数据（提供60天历史窗口）
+                historical_ohlcv = historical_ohlcv[historical_ohlcv.index >= "2019-01-01"]
+                click.echo(f"  历史数据: {historical_ohlcv.index.min().date()} ~ {historical_ohlcv.index.max().date()} ({len(historical_ohlcv)} 天)")
+
+                # 拼接历史数据和测试数据
+                extended_ohlcv = pd.concat([historical_ohlcv, aligned_data["ohlcv"]])
+                click.echo(f"  扩展数据: {extended_ohlcv.index.min().date()} ~ {extended_ohlcv.index.max().date()} ({len(extended_ohlcv)} 天)")
+
+                # 计算特征
+                feature_engineer = FeatureEngineer()
+                extended_features = feature_engineer.compute_all_features(extended_ohlcv, drop_na=True)
+
+                # 只保留2020-2024的特征（删除历史特征）
+                features_df = extended_features[extended_features.index >= "2020-01-01"]
+
+                click.echo(f"  ✅ 特征计算完成:")
+                click.echo(f"     - 特征数量: {features_df.shape[1]} 个")
+                click.echo(f"     - 信号开始: {features_df.index.min().date()} (无窗口损失)")
+                click.echo(f"     - 信号天数: {len(features_df)} 天")
+            else:
+                click.echo("  ⚠️ 历史数据不存在，直接使用测试数据")
+                feature_engineer = FeatureEngineer()
+                features_df = feature_engineer.compute_all_features(aligned_data["ohlcv"])
+                click.echo(f"  ✅ 特征计算: {features_df.shape[1]} 个因子")
+
         except Exception as e:
             click.echo(f"  ⚠️ 特征工程失败: {e}")
 
@@ -993,11 +1026,41 @@ def cache_build(
         # ====================================================================
         logger.info("时间对齐修正：使用T-1的新闻和价格做T的决策")
 
-        # 准备OHLCV数据字典（用于快速查询）
+        # 【性能优化1】预构建OHLCV数据字典（O(1)查找）
         ohlcv_dict = {}
         if ohlcv_data is not None:
             for idx, row in ohlcv_data.iterrows():
                 ohlcv_dict[idx] = row
+
+        # 【性能优化2】预构建北向资金缓存字典（O(1)查找，避免循环中.loc操作）
+        northbound_dict = {}
+        if northbound_data is not None:
+            for idx in northbound_data.index:
+                northbound_dict[idx] = northbound_data.loc[idx].to_dict()
+            logger.info(f"✓ 北向资金缓存: {len(northbound_dict)} 条")
+
+        # 【性能优化3】预计算宏观数据的最新值（避免循环中重复groupby）
+        macro_latest_cache = {}  # {date: {title: {publish_date, content}}}
+        if macro_data is not None and not macro_data.empty:
+            # 获取所有唯一日期并排序
+            all_dates = sorted(macro_data.index.unique())
+            for date in all_dates:
+                # 获取该日期及之前的所有宏观数据
+                available = macro_data[macro_data.index <= date]
+                # 按类型分组，取每种类型的最新一条
+                latest_by_title = {}
+                for title in available['title'].unique():
+                    title_data = available[available['title'] == title]
+                    if not title_data.empty:
+                        latest_row = title_data.iloc[-1]
+                        publish_date = title_data.index[-1]
+                        content_short = str(latest_row.get('content', ''))[:50] + "..." if len(str(latest_row.get('content', ''))) > 50 else str(latest_row.get('content', ''))
+                        latest_by_title[title] = {
+                            'publish_date': publish_date,
+                            'content': content_short
+                        }
+                macro_latest_cache[date] = latest_by_title
+            logger.info(f"✓ 宏观数据缓存: {len(macro_latest_cache)} 个日期")
 
         # 为每一天生成market_context（包含昨日价格数据）
         enhanced_news_list = []
@@ -1041,42 +1104,39 @@ def cache_build(
             # 获取T-1的OHLCV数据（昨日收盘数据）
             t_minus_1_ohlcv = ohlcv_dict[t_minus_1]
 
-            # 获取T-1的北向资金数据（如果T-1没有，也像OHLCV一样向前查找最多15天）
-            # 注意：北向资金在A股长假期间可能仍有数据（港股开市），需要查找更多天数
+            # 【优化】使用预构建的北向资金字典（O(1)查找）
             northbound_info = ""
-            if northbound_data is not None:
+            if northbound_dict:
+                nb = None
                 nb_date = None
-                # 如果T-1没有北向资金数据，向前查找最多15天（与OHLCV一致）
+                # 如果T-1没有北向资金数据，向前查找最多15天
                 for days_back in range(0, 16):
                     check_date = t_minus_1 - pd.Timedelta(days=days_back)
-                    if check_date in northbound_data.index:
-                        nb = northbound_data.loc[check_date]
+                    if check_date in northbound_dict:  # O(1) 字典查找
+                        nb = northbound_dict[check_date]
                         nb_date = check_date
                         break
-                else:
-                    nb = None
 
                 if nb is not None:
-                    flow_value = nb.get('net_inflow', 'N/A')
+                    flow_value = nb.get('net_flow', 'N/A')
                     if pd.notna(flow_value) and isinstance(flow_value, (int, float)):
                         date_note = f"({nb_date.date()})" if nb_date != t_minus_1 else ""
                         northbound_info = f"\n- 北向资金{date_note}: 净流入 {flow_value:.2f} 亿元"
 
-            # 获取最新的宏观数据（<= T-1的最新发布，避免未来函数）
+            # 【优化】使用预计算的宏观数据缓存（避免重复groupby）
             macro_info = ""
-            if macro_data is not None and not macro_data.empty:
-                # 查找 <= t_minus_1 的最新宏观数据
-                available_macros = macro_data[macro_data.index <= t_minus_1]
-                if not available_macros.empty:
-                    # 获取最近的几条宏观数据（每种类型取最新）
+            if macro_latest_cache:
+                # 查找 <= t_minus_1 的最新日期
+                available_dates = [d for d in macro_latest_cache.keys() if d <= t_minus_1]
+                if available_dates:
+                    latest_date = max(available_dates)
+                    latest_macros_dict = macro_latest_cache[latest_date]
+
+                    # 格式化输出
                     latest_macros = []
-                    # 按类型分组，取每种类型的最新一条
-                    for title, group in available_macros.groupby('title'):
-                        latest = group.iloc[-1]  # 最新的
-                        publish_date = group.index[-1]
-                        date_note = f"({publish_date.date()})"
-                        content_short = str(latest.get('content', ''))[:50] + "..." if len(str(latest.get('content', ''))) > 50 else str(latest.get('content', ''))
-                        latest_macros.append(f"- {title}{date_note}: {content_short}")
+                    for title, info in latest_macros_dict.items():
+                        date_note = f"({info['publish_date'].date()})"
+                        latest_macros.append(f"- {title}{date_note}: {info['content']}")
 
                     if latest_macros:
                         macro_info = "\n- 宏观数据:\n" + "\n".join(latest_macros[:3])  # 最多显示3条
