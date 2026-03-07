@@ -2,7 +2,7 @@
 """
 DualTrack Quant Research - CLI 主入口。
 
-六轨道对比实验测试平台 (Testbed)：
+双轨对比实验测试平台 (Testbed)：
 - LR Track: Logistic Regression (线性基线)
 - LSTM Track: 序列建模
 - LightGBM Track: 集成学习
@@ -14,13 +14,13 @@ Usage:
     python main.py run --track lr --symbol CSI300
     python main.py run --track lstm --symbol CSI300
     python main.py run --track lgb --symbol CSI300
-    python main.py run --track deepseek-v3 --symbol CSI300
+    python main.py run --track deepseek-v3.2 --symbol CSI300
     python main.py run --track deepseek-r1-14b --symbol CSI300
     python main.py evaluate
     python main.py cache-build
 
 子命令:
-    run:         执行六轨道对比实验
+    run:         执行双轨对比实验
     evaluate:    重新生成评估图表
     cache-build: 构建 LLM 离线缓存
 """
@@ -59,17 +59,22 @@ logger = get_logger(__name__)
 @click.pass_context
 def cli(ctx: click.Context, verbose: bool) -> None:
     """
-    DualTrack Quant Research - 六轨道对比实验测试平台。
+    DualTrack Quant Research - 双轨对比实验测试平台。
 
-    项目目标：建立公平的"竞技场"，在相同市场条件下对比五种量化技术。
+    项目目标：建立公平的"竞技场"，在相同市场条件下对比双轨量化技术。
 
-    六轨道设计：
-      - LR: Logistic Regression（线性基线）
-      - LSTM: 序列建模（时序特性）
-      - LightGBM: 集成学习（树模型）
-      - DeepSeek V3: DeepSeek V3.2（官方API）
-      - DeepSeek R1 14B: DeepSeek R1 14B (SiliconFlow)
-      - DeepSeek R1 8B: DeepSeek R1 8B (SiliconFlow)
+    双轨设计：
+      - ML Track (机器学习轨道):
+        * LR: Logistic Regression（线性基线）
+        * LSTM: 序列建模（时序特性）
+        * LightGBM: 集成学习（树模型）
+
+      - LLM Track (大语言模型轨道):
+        * DeepSeek V3.2: DeepSeek V3.2 满血版 (SiliconFlow)
+        * DeepSeek R1 14B: DeepSeek R1 14B 蒸馏版 (SiliconFlow)
+        * DeepSeek R1 8B: DeepSeek R1 8B 轻量版 (SiliconFlow)
+        * Qwen3.5 397B: Qwen3.5 满血版 (SiliconFlow)
+        * Qwen3.5-9B: Qwen3.5-9B 可部署版 (SiliconFlow)
 
     核心假设：
       - H1: ML Tracks（拟合）vs LLM Tracks（推理）：哪种范式更优？
@@ -87,16 +92,16 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 # ============================================================================
 @cli.command("run")
 @click.option("--track", "-t",
-              type=click.Choice(["lr", "lstm", "lgb", "deepseek-v3", "deepseek-r1-14b", "deepseek-r1-8b", "all"]),
+              type=click.Choice(["lr", "lstm", "lgb", "deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b", "all"]),
               default="all",
-              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, deepseek-v3=DeepSeek V3, deepseek-r1-14b=DeepSeek R1 14B, deepseek-r1-8b=DeepSeek R1 8B, all=全部")
+              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, deepseek-v3.2=DeepSeek V3.2, deepseek-v3.2-reasoning=DeepSeek V3.2(推理模式), deepseek-r1-14b=DeepSeek R1 14B, deepseek-r1-8b=DeepSeek R1 8B, qwen3.5=Qwen3.5 397B满血版, qwen3.5-9b=Qwen3.5-9B, all=全部")
 @click.option("--symbol", "-s", default="CSI300", help="交易标的 (CSI300/QQQ)")
 @click.option("--start", default="2020-01-02", help="回测开始日期")
 @click.option("--end", default="2024-12-31", help="回测结束日期")
 @click.option("--initial-cash", default=1000000.0, help="初始资金")
 @click.option("--commission", default=0.0002, help="佣金率")
 @click.option("--output-dir", default="docs/output", help="输出目录")
-@click.option("--compare", "-c", is_flag=True, help="生成六轨道对比分析报告")
+@click.option("--compare", "-c", is_flag=True, help="生成双轨对比分析报告")
 @click.pass_context
 def run_backtest(
     ctx: click.Context,
@@ -110,22 +115,29 @@ def run_backtest(
     compare: bool,
 ) -> None:
     """
-    执行六轨道对比实验。
+    执行双轨对比实验。
 
-    六轨道设计:
-      - lr: Logistic Regression (线性基线)
-      - lstm: LSTM (序列建模)
-      - lgb: LightGBM (集成学习)
-      - deepseek-v3: DeepSeek V3 (官方API)
-      - deepseek-r1-14b: DeepSeek R1 14B (SiliconFlow)
-      - deepseek-r1-8b: DeepSeek R1 8B (SiliconFlow)
-      - all: 同时运行全部六个轨道
+    双轨设计:
+      - ML Track (机器学习轨道):
+        * lr: Logistic Regression (线性基线)
+        * lstm: LSTM (序列建模)
+        * lgb: LightGBM (集成学习)
+
+      - LLM Track (大语言模型轨道):
+        * deepseek-v3.2: DeepSeek V3.2 (标准版)
+        * deepseek-v3.2-reasoning: DeepSeek V3.2 (推理模式, Pro版)
+        * deepseek-r1-14b: DeepSeek R1 14B (蒸馏版)
+        * deepseek-r1-8b: DeepSeek R1 8B (轻量版)
+        * qwen3.5: Qwen3.5 397B (满血版)
+        * qwen3.5-9b: Qwen3.5 9B (可部署版)
+
+      - all: 同时运行全部轨道
 
     实验设计:
       - Exp-1: LR vs LSTM vs LightGBM (哪种ML模型最适合量化?)
-      - Exp-2: LLM(Cloud) vs LLM(Local) (云端vs本地: 效果vs成本)
+      - Exp-2: LLM轨道内部对比 (满血版 vs 蒸馏版 vs 轻量版)
       - Exp-3: Best ML vs Best LLM (最终对决: 拟合vs推理)
-      - Exp-4: All 5 Tracks (全景对比)
+      - Exp-4: All Tracks (全景对比)
 
     流程:
       1. 数据获取 (共用)
@@ -136,7 +148,7 @@ def run_backtest(
     verbose = ctx.obj.get("verbose", False)
 
     click.echo("=" * 70)
-    click.echo("  DualTrack Quant - 六轨道对比实验测试平台")
+    click.echo("  DualTrack Quant - 双轨对比实验测试平台")
     click.echo("=" * 70)
     click.echo(f"  选择轨道: {track}")
     click.echo(f"  标的: {symbol}")
@@ -209,6 +221,27 @@ def run_backtest(
                 (news_data["timestamp"] >= start_dt) & (news_data["timestamp"] <= end_dt)
             ]
             click.echo(f"  ✅ 新闻数据: {len(news_data)} 条 (日期范围: {start} ~ {end})")
+        elif symbol == "QQQ":
+            # 美股新闻数据加载
+            us_news_path = Path("data/raw/us_market_news/us_news_real_timestamp_2020.csv")
+            if us_news_path.exists():
+                click.echo(f"  使用美股新闻数据: {us_news_path}")
+                news_data = pd.read_csv(us_news_path, parse_dates=["timestamp"])
+                # 过滤时间范围
+                news_data = news_data[
+                    (news_data["timestamp"] >= start_dt) & (news_data["timestamp"] <= end_dt)
+                ]
+                click.echo(f"  ✅ 美股新闻数据: {len(news_data)} 条 (日期范围: {start} ~ {end})")
+            else:
+                # 回退到 Mock 数据
+                click.echo("  ⚠️  美股新闻数据文件不存在，使用 Mock 数据")
+                news_generator = MockNewsGenerator()
+                news_data = news_generator.generate_mock_news(
+                    start_date=start,
+                    end_date=end,
+                    symbols=[symbol],
+                )
+                click.echo(f"  ✅ 新闻数据: {len(news_data)} 条")
         else:
             real_news_path = Path("data/raw/real_csi300_news_3m.csv")
             if real_news_path.exists() and symbol == "CSI300":
@@ -240,13 +273,13 @@ def run_backtest(
         aligned_data = {"ohlcv": ohlcv_data, "news": pd.DataFrame()}
 
     # ================================================================
-    # Phase 2-3: 六轨道信号生成
+    # Phase 2-3: 双轨信号生成
     # ================================================================
 
     # 确定要运行的轨道
     tracks_to_run = []
     if track == "all":
-        tracks_to_run = ["lr", "lstm", "lgb", "deepseek-v3", "deepseek-r1-14b", "deepseek-r1-8b"]
+        tracks_to_run = ["lr", "lstm", "lgb", "deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b"]
     else:
         tracks_to_run = [track]
 
@@ -267,14 +300,21 @@ def run_backtest(
             # ====================================================================
             # 关键修复：使用扩展的历史数据避免前60天特征缺失
             # ====================================================================
-            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            # 根据市场选择训练数据
+            if symbol == "QQQ":
+                train_data_path = Path("data/raw/qqq_train_2015_2017.csv")
+                hist_start_date = "2017-10-01"
+            else:  # CSI300
+                train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+                hist_start_date = "2019-01-01"
+
             if train_data_path.exists():
-                click.echo("  加载历史数据（2019年）避免特征窗口损失...")
+                click.echo(f"  加载历史数据避免特征窗口损失...")
                 historical_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
                 historical_ohlcv.set_index("date", inplace=True)
 
-                # 只使用2019年的数据（提供60天历史窗口）
-                historical_ohlcv = historical_ohlcv[historical_ohlcv.index >= "2019-01-01"]
+                # 使用历史数据的最后一段时间（提供60天历史窗口）
+                historical_ohlcv = historical_ohlcv[historical_ohlcv.index >= hist_start_date]
                 click.echo(f"  历史数据: {historical_ohlcv.index.min().date()} ~ {historical_ohlcv.index.max().date()} ({len(historical_ohlcv)} 天)")
 
                 # 拼接历史数据和测试数据
@@ -285,8 +325,13 @@ def run_backtest(
                 feature_engineer = FeatureEngineer()
                 extended_features = feature_engineer.compute_all_features(extended_ohlcv, drop_na=True)
 
-                # 只保留2020-2024的特征（删除历史特征）
-                features_df = extended_features[extended_features.index >= "2020-01-01"]
+                # 只保留回测时段的特征（删除历史特征）
+                # 对于 QQQ，从 2018-01-01 开始
+                # 对于 CSI300，从 2020-01-01 开始
+                if symbol == "QQQ":
+                    features_df = extended_features[extended_features.index >= "2018-01-01"]
+                else:
+                    features_df = extended_features[extended_features.index >= "2020-01-01"]
 
                 click.echo(f"  ✅ 特征计算完成:")
                 click.echo(f"     - 特征数量: {features_df.shape[1]} 个")
@@ -308,8 +353,13 @@ def run_backtest(
             from src.models.ml_track.baselines import LogisticRegressionModel
             from src.models.ml_track.features import FeatureEngineer
 
-            # 加载训练数据（2015-2019）
-            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            # 加载训练数据
+            # 根据市场选择训练数据
+            if symbol == "QQQ":
+                train_data_path = Path("data/raw/qqq_train_2015_2017.csv")
+            else:  # CSI300
+                train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+
             if train_data_path.exists():
                 click.echo(f"  加载训练数据: {train_data_path}")
                 train_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
@@ -333,8 +383,12 @@ def run_backtest(
                 lr_model.fit(X_train, y_train)
                 click.echo(f"  ✅ 模型训练完成")
 
-                # 在测试数据（2020-2024）上生成信号
-                click.echo("  在测试集（2020-2024）上生成信号...")
+                # 在测试数据上生成信号
+                if symbol == "QQQ":
+                    test_period_desc = "2018-2020"
+                else:
+                    test_period_desc = "2020-2024"
+                click.echo(f"  在测试集（{test_period_desc}）上生成信号...")
                 if features_df is not None and len(features_df) > 50:
                     test_engineer = FeatureEngineer()
                     test_features_with_target = test_engineer.create_target(features_df.copy(), forward_period=1)
@@ -370,8 +424,13 @@ def run_backtest(
             from src.models.ml_track.baselines import LSTMModel
             from src.models.ml_track.features import FeatureEngineer
 
-            # 加载训练数据（2015-2019）
-            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            # 加载训练数据
+            # 根据市场选择训练数据
+            if symbol == "QQQ":
+                train_data_path = Path("data/raw/qqq_train_2015_2017.csv")
+            else:  # CSI300
+                train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+
             if train_data_path.exists():
                 click.echo(f"  加载训练数据: {train_data_path}")
                 train_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
@@ -438,8 +497,13 @@ def run_backtest(
             from src.models.ml_track.baselines import LightGBMModel
             from src.models.ml_track.features import FeatureEngineer
 
-            # 加载训练数据（2015-2019）
-            train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+            # 加载训练数据
+            # 根据市场选择训练数据
+            if symbol == "QQQ":
+                train_data_path = Path("data/raw/qqq_train_2015_2017.csv")
+            else:  # CSI300
+                train_data_path = Path("data/raw/csi300_train_2015_2019.csv")
+
             if train_data_path.exists():
                 click.echo(f"  加载训练数据: {train_data_path}")
                 train_ohlcv = pd.read_csv(train_data_path, parse_dates=["date"])
@@ -493,14 +557,14 @@ def run_backtest(
             click.echo(f"  ⚠️ LightGBM 失败，使用模拟信号: {e}")
             track_signals["lgb"] = _generate_mock_ml_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道4: DeepSeek V3
-    if "deepseek-v3" in tracks_to_run:
-        click.echo("\n[轨道 4/6] DeepSeek V3 信号生成...")
+    # 轨道4: DeepSeek V3.2
+    if "deepseek-v3.2" in tracks_to_run:
+        click.echo("\n[轨道 4/8] DeepSeek V3.2 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
             # 使用DeepSeek V3.2缓存
-            cache_path_deepseek_v3 = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_v3.jsonl")
+            cache_path_deepseek_v3 = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_v3_2.jsonl")
 
             if cache_path_deepseek_v3.exists():
                 llm_v3_agent = LLMTradingAgent(
@@ -508,27 +572,55 @@ def run_backtest(
                     model="deepseek-ai/DeepSeek-V3.2"
                 )
                 llm_v3_agent._load_cache(cache_path_deepseek_v3)
-                click.echo(f"  使用DeepSeek V3缓存: {cache_path_deepseek_v3}")
+                click.echo(f"  使用DeepSeek V3.2缓存: {cache_path_deepseek_v3}")
                 llm_v3_signals = llm_v3_agent.get_signals_from_cache(symbol=symbol)
             else:
-                click.echo(f"  ⚠️ 未找到DeepSeek V3缓存: {cache_path_deepseek_v3}")
+                click.echo(f"  ⚠️ 未找到DeepSeek V3.2缓存: {cache_path_deepseek_v3}")
                 click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model deepseek-ai/DeepSeek-V3.2 --symbol {symbol}")
                 llm_v3_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-            track_signals["deepseek-v3"] = llm_v3_signals
-            click.echo(f"  ✅ DeepSeek V3 信号: {len(llm_v3_signals)} 条")
+            track_signals["deepseek-v3.2"] = llm_v3_signals
+            click.echo(f"  ✅ DeepSeek V3.2 信号: {len(llm_v3_signals)} 条")
         except Exception as e:
-            click.echo(f"  ⚠️ DeepSeek V3 失败，使用模拟信号: {e}")
-            track_signals["deepseek-v3"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+            click.echo(f"  ⚠️ DeepSeek V3.2 失败，使用模拟信号: {e}")
+            track_signals["deepseek-v3.2"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道5: DeepSeek R1 14B
+    # 轨道5: DeepSeek V3.2 Reasoning (Pro版 + 推理模式)
+    if "deepseek-v3.2-reasoning" in tracks_to_run:
+        click.echo("\n[轨道 5/9] DeepSeek V3.2 Reasoning (Pro版 + 推理模式) 信号生成...")
+        try:
+            from src.models.llm_track.agent import LLMTradingAgent
+
+            # 使用DeepSeek V3.2 Reasoning缓存
+            cache_path_deepseek_v3_reasoning = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_v3_2_reasoning.jsonl")
+
+            if cache_path_deepseek_v3_reasoning.exists():
+                llm_v3_reasoning_agent = LLMTradingAgent(
+                    executor_type="siliconflow",
+                    model="Pro/deepseek-ai/DeepSeek-V3.2"
+                )
+                llm_v3_reasoning_agent._load_cache(cache_path_deepseek_v3_reasoning)
+                click.echo(f"  使用DeepSeek V3.2 Reasoning缓存: {cache_path_deepseek_v3_reasoning}")
+                llm_v3_reasoning_signals = llm_v3_reasoning_agent.get_signals_from_cache(symbol=symbol)
+            else:
+                click.echo(f"  ⚠️ 未找到DeepSeek V3.2 Reasoning缓存: {cache_path_deepseek_v3_reasoning}")
+                click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model Pro/deepseek-ai/DeepSeek-V3.2 --symbol {symbol} --reasoning")
+                llm_v3_reasoning_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+            track_signals["deepseek-v3.2-reasoning"] = llm_v3_reasoning_signals
+            click.echo(f"  ✅ DeepSeek V3.2 Reasoning 信号: {len(llm_v3_reasoning_signals)} 条")
+        except Exception as e:
+            click.echo(f"  ⚠️ DeepSeek V3.2 Reasoning 失败，使用模拟信号: {e}")
+            track_signals["deepseek-v3.2-reasoning"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+    # 轨道6: DeepSeek R1 14B
     if "deepseek-r1-14b" in tracks_to_run:
-        click.echo("\n[轨道 5/6] DeepSeek R1 14B 信号生成...")
+        click.echo("\n[轨道 6/9] DeepSeek R1 14B 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
             # 使用DeepSeek R1 14B缓存
-            cache_path_deepseek_14b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_r1_14b.jsonl")
+            cache_path_deepseek_14b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_14b.jsonl")
 
             if cache_path_deepseek_14b.exists():
                 llm_r1_14b_agent = LLMTradingAgent(
@@ -549,9 +641,9 @@ def run_backtest(
             click.echo(f"  ⚠️ DeepSeek R1 14B 失败，使用模拟信号: {e}")
             track_signals["deepseek-r1-14b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
-    # 轨道6: DeepSeek R1 8B
+    # 轨道7: DeepSeek R1 8B
     if "deepseek-r1-8b" in tracks_to_run:
-        click.echo("\n[轨道 6/6] DeepSeek R1 8B 信号生成...")
+        click.echo("\n[轨道 7/9] DeepSeek R1 8B 信号生成...")
         try:
             from src.models.llm_track.agent import LLMTradingAgent
 
@@ -577,6 +669,62 @@ def run_backtest(
             click.echo(f"  ⚠️ DeepSeek R1 8B 失败，使用模拟信号: {e}")
             track_signals["deepseek-r1-8b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
+    # 轨道8: Qwen3.5 满血版
+    if "qwen3.5" in tracks_to_run:
+        click.echo("\n[轨道 8/9] Qwen3.5 满血版 信号生成...")
+        try:
+            from src.models.llm_track.agent import LLMTradingAgent
+
+            # 使用Qwen3.5满血版缓存
+            cache_path_qwen35 = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_qwen35.jsonl")
+
+            if cache_path_qwen35.exists():
+                llm_qwen35_agent = LLMTradingAgent(
+                    executor_type="siliconflow",
+                    model="Qwen/Qwen3.5-397B-A17B"
+                )
+                llm_qwen35_agent._load_cache(cache_path_qwen35)
+                click.echo(f"  使用Qwen3.5满血版缓存: {cache_path_qwen35}")
+                llm_qwen35_signals = llm_qwen35_agent.get_signals_from_cache(symbol=symbol)
+            else:
+                click.echo(f"  ⚠️ 未找到Qwen3.5满血版缓存: {cache_path_qwen35}")
+                click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model Qwen/Qwen3.5-397B-A17B --symbol {symbol}")
+                llm_qwen35_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+            track_signals["qwen3.5"] = llm_qwen35_signals
+            click.echo(f"  ✅ Qwen3.5满血版 信号: {len(llm_qwen35_signals)} 条")
+        except Exception as e:
+            click.echo(f"  ⚠️ Qwen3.5满血版 失败，使用模拟信号: {e}")
+            track_signals["qwen3.5"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+    # 轨道9: Qwen3.5-9B
+    if "qwen3.5-9b" in tracks_to_run:
+        click.echo("\n[轨道 9/9] Qwen3.5-9B 信号生成...")
+        try:
+            from src.models.llm_track.agent import LLMTradingAgent
+
+            # 使用Qwen3.5-9B缓存
+            cache_path_qwen35_9b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_qwen35_9b.jsonl")
+
+            if cache_path_qwen35_9b.exists():
+                llm_qwen35_9b_agent = LLMTradingAgent(
+                    executor_type="siliconflow",
+                    model="Qwen/Qwen3.5-9B"
+                )
+                llm_qwen35_9b_agent._load_cache(cache_path_qwen35_9b)
+                click.echo(f"  使用Qwen3.5-9B缓存: {cache_path_qwen35_9b}")
+                llm_qwen35_9b_signals = llm_qwen35_9b_agent.get_signals_from_cache(symbol=symbol)
+            else:
+                click.echo(f"  ⚠️ 未找到Qwen3.5-9B缓存: {cache_path_qwen35_9b}")
+                click.echo(f"  请先运行: python main.py cache-build --executor siliconflow --model Qwen/Qwen3.5-9B --symbol {symbol}")
+                llm_qwen35_9b_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+            track_signals["qwen3.5-9b"] = llm_qwen35_9b_signals
+            click.echo(f"  ✅ Qwen3.5-9B 信号: {len(llm_qwen35_9b_signals)} 条")
+        except Exception as e:
+            click.echo(f"  ⚠️ Qwen3.5-9B 失败，使用模拟信号: {e}")
+            track_signals["qwen3.5-9b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
     # ================================================================
     # Phase 4: 信号转换 (独立运行，不融合！)
     # ================================================================
@@ -597,7 +745,7 @@ def run_backtest(
                 click.echo(f"  ⚠️ {track_name.upper()} 信号转换失败: {e}")
 
     # LLM Tracks 信号转换
-    for track_name in ["deepseek-v3", "deepseek-r1-14b", "deepseek-r1-8b"]:
+    for track_name in ["deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b"]:
         if track_name in track_signals:
             try:
                 track_positions[track_name] = SignalConverter.llm_signals_to_positions(
@@ -609,9 +757,9 @@ def run_backtest(
                 click.echo(f"  ⚠️ {track_name} 信号转换失败: {e}")
 
     # ================================================================
-    # Phase 5: 六轨道独立回测
+    # Phase 5: 双轨独立回测
     # ================================================================
-    click.echo("\n[Phase 5] 六轨道独立回测...")
+    click.echo("\n[Phase 5] 双轨独立回测...")
 
     from src.execution.bt_engine import BacktestEngine, DualTrackStrategy
 
@@ -713,19 +861,19 @@ def run_backtest(
 
                 equity_curves[track_name.upper()] = result.equity_curve
 
-        # 生成六轨道对比图表
+        # 生成双轨对比图表
         if equity_curves:
             plot_equity_curves(
                 equity_curves,
                 title=f"Five-Track Comparison: {symbol}",
                 save_path=str(output_path / f"equity_curves_{symbol}.png"),
             )
-            click.echo(f"\n  ✅ 六轨道对比图表已保存: {output_path / f'equity_curves_{symbol}.png'}")
+            click.echo(f"\n  ✅ 双轨对比图表已保存: {output_path / f'equity_curves_{symbol}.png'}")
 
-        # 六轨道对比分析报告
+        # 双轨对比分析报告
         if compare and len(track_metrics) > 1:
             click.echo("\n" + "=" * 70)
-            click.echo("  【六轨道对比分析】")
+            click.echo("  【双轨对比分析】")
             click.echo("=" * 70)
 
             # 构建对比表格
@@ -800,7 +948,7 @@ def run_backtest(
 
     # 显示各轨道结果汇总
     if track_results:
-        click.echo(f"\n  📊 六轨道回测结果汇总:")
+        click.echo(f"\n  📊 双轨回测结果汇总:")
         click.echo(f"  ┌──────────────┬────────────┬────────────┬────────────┬────────────┐")
         click.echo(f"  │     轨道     │   最终资产  │   总收益率  │   夏普比率  │   最大回撤  │")
         click.echo(f"  ├──────────────┼────────────┼────────────┼────────────┼────────────┤")
@@ -914,6 +1062,7 @@ def evaluate(
 @click.option("--output-dir", default="docs/cache/llm_responses", help="缓存输出目录")
 @click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "mock"]), help="LLM 执行器类型")
 @click.option("--model", default=None, help="LLM 模型名称（可选）")
+@click.option("--reasoning", is_flag=True, help="开启推理模式（如支持）")
 @click.pass_context
 def cache_build(
     ctx: click.Context,
@@ -924,6 +1073,7 @@ def cache_build(
     output_dir: str,
     executor: str,
     model: Optional[str],
+    reasoning: bool,
 ) -> None:
     """
     构建 LLM 响应离线缓存（支持断点续传）。
@@ -994,24 +1144,36 @@ def cache_build(
         macro_data = None
         if news_path.exists():
             all_news = pd.read_csv(news_path, parse_dates=["timestamp"])
-            macro_data = all_news[all_news["source"] == "macro"].copy()
-            if not macro_data.empty:
-                macro_data.set_index("timestamp", inplace=True)
-                macro_data.sort_index(inplace=True)
-                logger.info(f"加载宏观数据: {len(macro_data)} 条")
+            # 只有当 source 列存在时才筛选宏观数据
+            if "source" in all_news.columns:
+                macro_data = all_news[all_news["source"] == "macro"].copy()
+                if not macro_data.empty:
+                    macro_data.set_index("timestamp", inplace=True)
+                    macro_data.sort_index(inplace=True)
+                    logger.info(f"加载宏观数据: {len(macro_data)} 条")
+                else:
+                    logger.warning("新闻数据中未找到宏观数据")
             else:
-                logger.warning("新闻数据中未找到宏观数据")
+                logger.warning("新闻数据中无 'source' 列，跳过宏观数据加载")
         else:
             logger.warning(f"新闻数据文件不存在，无法加载宏观数据")
 
         # 数据聚合：将多源新闻聚合为每日决策
         logger.info("数据聚合: 将多源新闻聚合为每日决策...")
+
+        # 判断市场类型
+        from src.config.market_config import MarketConfig, MarketType
+        market_type_enum = MarketConfig.get_market_type_for_symbol(symbol)
+        market_type = "US_MARKET" if market_type_enum == MarketType.US_MARKET else "A_SHARE"
+        logger.info(f"市场类型: {market_type}")
+
         daily_news = DataAligner.aggregate_daily_news(
             news_data,
             max_news_per_day=20,
             max_content_length=150,
             source_col="source" if "source" in news_data.columns else None,
-            filter_notices=True  # 智能筛选重要公告
+            filter_notices=True,  # 智能筛选重要公告
+            market_type=market_type  # 传递市场类型
         )
         logger.info(f"聚合完成: {len(news_data)} 条 → {len(daily_news)} 天")
 
@@ -1179,35 +1341,36 @@ def cache_build(
         logger.info(f"使用模型: {model}")
 
         # 根据模型名称生成缓存文件名
-        # 提取模型标识：deepseek-official, deepseek-14b, deepseek-8b
-        if "deepseek-reasoner" in model or model == "deepseek-chat":
-            model_tag = "deepseek_official"
+        # 提取模型标识：deepseek_v3_2, deepseek_v3_2_reasoning, deepseek_14b, deepseek_8b, qwen35, qwen35_9b
+        if "DeepSeek-V3.2" in model or "DeepSeek-V3" in model:
+            model_tag = "deepseek_v3_2"
+            if reasoning:
+                model_tag += "_reasoning"
         elif "DeepSeek-R1-Distill-Qwen-14B" in model:
             model_tag = "deepseek_14b"
         elif "DeepSeek-R1-0528-Qwen3-8B" in model:
             model_tag = "deepseek_8b"
-        else:
-            model_tag = executor
-
-        cache_file = output_path / f"llm_cache_{symbol}_{model_tag}.jsonl"
-        logger.info(f"缓存文件: {cache_file}")
-
-        # 根据模型名称生成缓存文件名
-        # 提取模型标识：deepseek-official, deepseek-14b, deepseek-8b
-        if "deepseek-reasoner" in model or model == "deepseek-chat":
+        elif "Qwen3.5-397B" in model:
+            model_tag = "qwen35"
+        elif "Qwen3.5-9B" in model:
+            model_tag = "qwen35_9b"
+        elif "deepseek-reasoner" in model or model == "deepseek-chat":
             model_tag = "deepseek_official"
-        elif "DeepSeek-R1-Distill-Qwen-14B" in model:
-            model_tag = "deepseek_14b"
-        elif "DeepSeek-R1-0528-Qwen3-8B" in model:
-            model_tag = "deepseek_8b"
         else:
-            model_tag = executor
+            model_tag = executor.replace(".", "_")
 
         cache_file = output_path / f"llm_cache_{symbol}_{model_tag}.jsonl"
         logger.info(f"缓存文件: {cache_file}")
 
-        # 初始化 LLM Agent
-        llm_agent = LLMTradingAgent(executor_type=executor, model=model)
+        # 初始化 LLM Agent（传递 reasoning 参数）
+        llm_agent = LLMTradingAgent(
+            executor_type=executor,
+            model=model,
+            reasoning=reasoning
+        )
+
+        if reasoning:
+            logger.info("✓ 推理模式已启用")
 
         # 检查已有缓存（断点续传）
         if cache_file.exists():

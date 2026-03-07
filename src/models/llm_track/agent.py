@@ -21,6 +21,8 @@ from tqdm import tqdm
 
 from src.utils.logger import get_logger
 from .prompts import SentimentPromptBuilder, TradingDecisionParser
+from .us_prompts import USMarketPromptBuilder
+from src.config.market_config import MarketConfig, MarketType
 
 logger = get_logger(__name__)
 
@@ -362,12 +364,19 @@ class DeepSeekExecutor(BaseExecutor):
             )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=kwargs.get("temperature", self.temperature),
-                max_tokens=kwargs.get("max_tokens", 1024),
-            )
+            # 构建API请求参数
+            api_params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": kwargs.get("temperature", self.temperature),
+                "max_tokens": kwargs.get("max_tokens", 1024),
+            }
+
+            # 如果开启推理模式，添加 reasoning_effort 参数
+            if kwargs.get("reasoning", False):
+                api_params["reasoning_effort"] = kwargs.get("reasoning_effort", "medium")
+
+            response = self.client.chat.completions.create(**api_params)
 
             latency_ms = (time.time() - start_time) * 1000
             content = response.choices[0].message.content or ""
@@ -513,6 +522,7 @@ class CacheEntry:
     reasoning: str
     latency_ms: float
     model: str
+    raw_response: str = ""  # 保存原始API响应，用于调试
     cache_time: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_jsonl(self) -> str:
@@ -531,6 +541,7 @@ class CacheEntry:
             "reasoning": self.reasoning,
             "latency_ms": self.latency_ms,
             "model": self.model,
+            "raw_response": self.raw_response,
             "cache_time": self.cache_time,
         }
 
@@ -566,12 +577,13 @@ class LLMTradingAgent:
         temperature: float = 0.7,
         use_cache: bool = True,
         cache_dir: Optional[Path] = None,
+        reasoning: bool = False,
     ) -> None:
         """
         初始化 LLM 交易代理。
 
         Args:
-            executor_type: 执行器类型，可选 'ollama', 'deepseek', 'mock'。
+            executor_type: 执行器类型，可选 'ollama', 'deepseek', 'siliconflow', 'mock'。
             model: 模型名称。
             api_key: API Key（用于云端模式）。
             base_url: 基础 URL（用于自定义端点）。
@@ -579,10 +591,16 @@ class LLMTradingAgent:
             temperature: 生成温度。
             use_cache: 是否启用缓存。
             cache_dir: 缓存目录，默认为 data/llm_cache/。
+            reasoning: 是否开启推理模式（如模型支持）。
         """
         self.executor_type = executor_type
         self.use_cache = use_cache
-        self.prompt_builder = SentimentPromptBuilder(use_simple_format=True)
+        self.reasoning = reasoning
+
+        # 初始化提示词构建器（默认为 A 股）
+        # 将在 analyze() 方法中根据 symbol 动态选择
+        self.prompt_builder_a_share = SentimentPromptBuilder(use_simple_format=True)
+        self.prompt_builder_us = USMarketPromptBuilder(use_simple_format=True)
 
         # 设置缓存目录
         project_root = Path(__file__).parent.parent.parent
@@ -657,6 +675,23 @@ class LLMTradingAgent:
         else:
             raise ValueError(f"不支持的执行器类型: {executor_type}")
 
+    def _get_prompt_builder(self, symbol: str):
+        """
+        根据股票代码选择提示词构建器。
+
+        Args:
+            symbol: 股票代码
+
+        Returns:
+            对应的提示词构建器（A股或美股）
+        """
+        market_type = MarketConfig.get_market_type_for_symbol(symbol)
+
+        if market_type == MarketType.US_MARKET:
+            return self.prompt_builder_us
+        else:
+            return self.prompt_builder_a_share
+
     def analyze(
         self,
         news_text: str,
@@ -676,6 +711,9 @@ class LLMTradingAgent:
         Returns:
             LLMResponse 对象。
         """
+        # 根据市场类型选择提示词构建器
+        prompt_builder = self._get_prompt_builder(symbol)
+
         # 构建缓存键（优先使用时间戳，更稳定）
         if timestamp is not None:
             ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
@@ -699,13 +737,13 @@ class LLMTradingAgent:
             )
 
         # 构建 Prompt
-        messages = self.prompt_builder.build_messages(
+        messages = prompt_builder.build_messages(
             market_context=market_context,
             news_text=news_text,
         )
 
         # 执行推理
-        response = self.executor.execute(messages)
+        response = self.executor.execute(messages, reasoning=self.reasoning)
         response.timestamp = timestamp
         response.symbol = symbol
 
@@ -797,6 +835,7 @@ class LLMTradingAgent:
                 "confidence": response.confidence,
                 "model": response.model,
                 "parse_success": response.parse_success,
+                "raw_response": response.raw_response,  # 保存原始响应
             }
 
             # 实时追加保存（支持断点续传）
@@ -987,7 +1026,7 @@ class LLMTradingAgent:
                 ts = ""
 
             # 将 entry 转换为 CacheEntry 格式
-            # entry 格式: {timestamp, symbol, llm_signal, reasoning, latency_ms, confidence, model, parse_success}
+            # entry 格式: {timestamp, symbol, llm_signal, reasoning, latency_ms, confidence, model, parse_success, raw_response}
             cache_entry = CacheEntry(
                 timestamp=ts,
                 symbol=entry.get("symbol", "UNKNOWN"),
@@ -998,6 +1037,7 @@ class LLMTradingAgent:
                 reasoning=entry.get("reasoning", ""),
                 latency_ms=entry.get("latency_ms", 0.0),
                 model=entry.get("model", "unknown"),
+                raw_response=entry.get("raw_response", ""),  # 添加原始响应
             )
 
             # 追加模式写入
