@@ -17,7 +17,8 @@
 **原因**: uv 比 pip 快 10-100 倍，且自动管理虚拟环境。
 
 ## 3. Technology Stack
-- **Core Frameworks**: Backtrader (Execution), scikit-learn/LightGBM (ML Track), Ollama/DeepSeek API (LLM Track)。
+- **Core Frameworks**: Backtrader (Execution), scikit-learn/LightGBM (ML Track), DeepSeek/Qwen/Ollama API (LLM Track)。
+- **Multi-Market Support**: A 股 (CSI300) 和美股 (QQQ/NASDAQ-100)。
 - **Hardware Optimization**: 针对 Apple Silicon (M系列芯片) 优化，PyTorch 模型必须优先挂载至 `mps` 设备。
 
 ## 4. Architecture Strict Rules
@@ -79,8 +80,17 @@ docker build -t dualtrack-quant .
 
 | 文件 | 功能 | 核心特性 |
 |-----|------|---------|
-| `prompts.py` | Chain-of-Thought 提示模板 | 5 步推理框架 (数据概览→技术分析→情绪评估→风险识别→决策输出) |
-| `agent.py` | LLM 智能体 | OllamaExecutor, DeepSeekExecutor, MockExecutor；JSON 解析容错；`.jsonl` 离线缓存 (加速比 >100x) |
+| `prompts.py` | A股 Chain-of-Thought 提示模板 | 5 步推理框架 |
+| `us_prompts.py` | 美股提示模板 | 针对美股市场优化 |
+| `agent.py` | LLM 智能体 | DeepSeekExecutor, QwenExecutor, OllamaExecutor, SiliconFlowExecutor；JSON 解析容错；`.jsonl` 离线缓存 |
+
+**支持模型**:
+- DeepSeek V3.2 (云端)
+- DeepSeek V3.2 Reasoning (云端，推理模式)
+- DeepSeek R1 14B (本地)
+- DeepSeek R1 8B (本地)
+- Qwen3.5 397B (云端)
+- Qwen3.5-9B (云端)
 
 **验证**: `tests/test_llm_track.py` - JSON 解析容错、执行器连通性
 
@@ -167,21 +177,49 @@ src/
 ├── data/              # Phase 1: 数据获取与对齐
 │   ├── market_data.py     # OHLCV 数据获取 (akshare, yfinance)
 │   ├── news_data.py       # 新闻/情绪数据生成
-│   └── data_aligner.py    # 时间对齐与缺失值处理
+│   ├── data_aligner.py    # 时间对齐与缺失值处理
+│   └── fetch_real_news.py # 真实新闻获取
 ├── models/
 │   ├── ml_track/      # Phase 2: 机器学习轨道
 │   │   ├── features.py    # 特征工程 (50+ 技术指标)
 │   │   └── baselines.py   # 基准模型 (LR, LSTM, LightGBM)
-│   └── llm_track/     # Phase 3: 大语言模型轨道
-│       ├── prompts.py     # Chain-of-Thought 提示模板
-│       └── agent.py       # LLM 智能体 (Ollama, DeepSeek)
-├── orchestrator/      # Phase 4: 双轨编排器
-│   └── fusion_engine.py   # 信号融合与否决机制
+│   ├── llm_track/     # Phase 3: 大语言模型轨道
+│   │   ├── prompts.py     # Chain-of-Thought 提示模板 (A股)
+│   │   ├── us_prompts.py  # 美股提示模板
+│   │   └── agent.py       # LLM 智能体 (DeepSeek, Qwen, Ollama)
+│   └── model_manager.py   # 模型管理器
+├── orchestrator/      # Phase 4: 编排器
+│   ├── fusion_engine.py   # 信号融合引擎
+│   ├── signal_converter.py # 信号转换器
+│   └── comparator.py      # 对比分析器
 ├── execution/         # Phase 5: 回测执行引擎
-│   └── bt_engine.py       # Backtrader 封装
-└── evaluation/        # Phase 6: 多维度评估
-    ├── metrics_calculator.py  # 金融与工程指标计算
-    └── visualizer.py     # 论文图表生成
+│   ├── bt_engine.py       # Backtrader 封装
+│   ├── base_strategy.py   # 基础策略
+│   ├── a_share_strategy.py # A股策略
+│   └── us_market_strategy.py # 美股策略
+├── evaluation/        # Phase 6: 多维度评估
+│   ├── metrics_calculator.py  # 金融与工程指标计算
+│   ├── visualizer.py     # 论文图表生成
+│   └── report_generator.py # 报告生成
+├── utils/             # 工具函数
+│   ├── logger.py          # 日志工具
+│   ├── config_loader.py   # 配置加载
+│   └── time_utils.py      # 交易日对齐、防未来函数
+└── config/            # 配置模块
+    └── market_config.py   # 市场配置
+config/                # 配置文件
+├── llm_config.yaml        # LLM 配置
+├── data_config.yaml       # 数据配置
+├── ml_config.yaml         # ML 配置
+└── backtest_config.yaml   # 回测配置
+scripts/               # 数据处理脚本
+├── fetch_financial_news.py   # 金融新闻获取
+├── fetch_csi300_constituents.py # 沪深300成分股
+└── prepare_us_news.py    # 美股新闻准备
+docs/
+├── figures/           # 论文图表 (PNG, 300 DPI)
+├── cache/llm_responses/ # LLM 离线缓存 (.jsonl)
+└── output/            # 回测结果输出
 ```
 
 ## 7. Testing Requirements
@@ -195,6 +233,9 @@ src/
 | Orchestrator (Phase 4) | `test_orchestrator.py` | 否决机制、信号融合逻辑 |
 | Execution (Phase 5) | `test_bt_engine.py` | 订单成交验证、分析器提取 |
 | Evaluation (Phase 6) | `test_evaluation.py` | 指标计算、图表落盘检查 |
+| US Market | `test_us_market.py` | 美股市场回测验证 |
+| US News | `test_us_news_data.py` | 美股新闻数据处理 |
+| Backtest | `test_backtest.py` | 回测集成测试 |
 
 ## 8. Code Style
 - **Language**: Python 3.12+
@@ -208,8 +249,10 @@ src/
 
 | 后端 | 环境变量 | 用途 |
 |-----|---------|-----|
+| DeepSeek (云端) | `DEEPSEEK_API_KEY` | 高质量推理、低成本 |
+| Qwen (云端) | `OPENAI_API_KEY` / `DASHSCOPE_API_KEY` | 通义千问系列 |
+| SiliconFlow | `SILICONFLOW_API_KEY` | 多模型代理平台 |
 | Ollama (本地) | `OLLAMA_HOST` | 免费、低延迟、隐私保护 |
-| DeepSeek | `DEEPSEEK_API_KEY` | 高质量推理、低成本 |
 | Mock | - | 离线测试、无需 API |
 
 ## 10. Key Metrics for Paper
@@ -240,5 +283,5 @@ docs/
 
 ---
 
-*Last Updated: 2026-02-28*
-*Project Status: Phase 7 Complete (CLI & Docker Ready)*
+*Last Updated: 2026-03-09*
+*Project Status: Phase 7 Complete (Multi-Track & Multi-Market Ready)*
