@@ -3,12 +3,24 @@
 ## 1. Project Overview
 本项目是一个双轨制（Dual-Track）量化交易回测框架，核心目标是严格对比传统机器学习（Fitting）与大语言模型智能体（Semantic Reasoning）在量化交易中的 ROI 和鲁棒性，特别是在黑天鹅事件下的表现。
 
-## 2. Technology Stack
-- **Package Manager**: `uv` (严格禁止使用 pip 安装依赖，所有依赖变动必须更新 `pyproject.toml` 和 `uv.lock`)。
+## 2. Package Manager (重要)
+
+**本项目严格使用 `uv` 作为包管理器，禁止使用 pip！**
+
+| 操作 | 正确命令 | 错误命令 |
+|------|----------|----------|
+| 安装依赖 | `uv sync` | ❌ `pip install -r requirements.txt` |
+| 添加新依赖 | `uv add <package>` | ❌ `pip install <package>` |
+| 运行脚本 | `uv run python <script.py>` | ❌ `python <script.py>` |
+| 更新依赖 | `uv lock --upgrade` | ❌ 手动编辑 requirements.txt |
+
+**原因**: uv 比 pip 快 10-100 倍，且自动管理虚拟环境。
+
+## 3. Technology Stack
 - **Core Frameworks**: Backtrader (Execution), scikit-learn/LightGBM (ML Track), Ollama/DeepSeek API (LLM Track)。
 - **Hardware Optimization**: 针对 Apple Silicon (M系列芯片) 优化，PyTorch 模型必须优先挂载至 `mps` 设备。
 
-## 3. Architecture Strict Rules
+## 4. Architecture Strict Rules
 - **No Look-ahead Bias (绝对禁止未来函数)**: 在特征工程（计算 $t$ 时刻因子）和模型预测时，绝对禁止使用 $t+1$ 及之后的数据。数据对齐必须严格使用 `ffill`（向前填充）。
 - **Data Structures**:
   - ML Track 信号输出: `[timestamp, symbol, model_name, signal_strength_0_to_1]`
@@ -35,7 +47,7 @@ docker build -t dualtrack-quant .
 
 ---
 
-## 4. Completed Modules (Phase 1-7)
+## 5. Completed Modules (Phase 1-7)
 
 ### Phase 1: Data Layer
 **路径**: `src/data/`
@@ -149,7 +161,7 @@ docs/figures/
 
 ---
 
-## 5. Module Organization
+## 6. Module Organization
 ```
 src/
 ├── data/              # Phase 1: 数据获取与对齐
@@ -172,7 +184,7 @@ src/
     └── visualizer.py     # 论文图表生成
 ```
 
-## 6. Testing Requirements
+## 7. Testing Requirements
 所有模块必须包含对应的验证测试，位于 `tests/` 目录：
 
 | 模块 | 测试文件 | 核心验证点 |
@@ -184,14 +196,14 @@ src/
 | Execution (Phase 5) | `test_bt_engine.py` | 订单成交验证、分析器提取 |
 | Evaluation (Phase 6) | `test_evaluation.py` | 指标计算、图表落盘检查 |
 
-## 7. Code Style
+## 8. Code Style
 - **Language**: Python 3.12+
 - **Type Hints**: 所有函数必须包含类型注解
 - **Docstrings**: 使用 Google 风格的中文文档字符串
 - **Imports**: 标准库 → 第三方库 → 本地模块（按此顺序）
 - **Line Length**: 最大 100 字符
 
-## 8. LLM Configuration
+## 9. LLM Configuration
 项目支持多种 LLM 后端：
 
 | 后端 | 环境变量 | 用途 |
@@ -200,7 +212,7 @@ src/
 | DeepSeek | `DEEPSEEK_API_KEY` | 高质量推理、低成本 |
 | Mock | - | 离线测试、无需 API |
 
-## 9. Key Metrics for Paper
+## 10. Key Metrics for Paper
 论文对比分析必须包含以下指标：
 
 **金融指标:**
@@ -214,7 +226,7 @@ src/
 - Throughput (吞吐量)
 - Cost-per-Alpha (每个 Alpha 信号成本)
 
-## 10. Output Directories
+## 11. Output Directories
 ```
 docs/
 ├── figures/           # 论文图表 (PNG, 300 DPI)

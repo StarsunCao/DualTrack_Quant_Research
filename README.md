@@ -96,14 +96,32 @@ DualTrack 建立统一的基准测试标准，在**完全相同的市场条件**
 
 ### 安装依赖
 
+**本项目使用 `uv` 作为包管理器（禁止使用 pip）**
+
 ```bash
-# 使用 uv 安装依赖（强烈推荐）
+# 安装 uv（如果尚未安装）
 curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 安装项目依赖
 uv sync
 
-# 或使用 pip
-pip install -r requirements.txt
+# 运行回测
+uv run python main.py run --track all --compare --symbol CSI300
 ```
+
+<details>
+<summary>📋 uv 常用命令速查表</summary>
+
+| 操作 | 命令 |
+|------|------|
+| 安装所有依赖 | `uv sync` |
+| 添加新依赖 | `uv add <package>` |
+| 添加开发依赖 | `uv add --dev <package>` |
+| 运行脚本 | `uv run python <script.py>` |
+| 更新所有依赖 | `uv lock --upgrade && uv sync` |
+| 导出 requirements.txt | `uv pip freeze > requirements.txt` |
+
+</details>
 
 ### 五轨道 CLI
 
