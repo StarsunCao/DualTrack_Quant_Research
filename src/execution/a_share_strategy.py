@@ -15,8 +15,10 @@ from typing import Optional
 
 import backtrader as bt
 
+from .base_strategy import BaseMarketStrategy
 
-class AShareStrategy(bt.Strategy):
+
+class AShareStrategy(BaseMarketStrategy):
     """
     A股专用策略类。
 
@@ -38,18 +40,7 @@ class AShareStrategy(bt.Strategy):
 
     def __init__(self) -> None:
         """初始化策略。"""
-        self.dataclose = self.datas[0].close
-        self.order = None
-        self.trade_count = 0
-        self.last_rebalance = None
-
-        # 记录每日资产价值
-        self.equity_curve: list[dict] = []
-
-        # 交易记录
-        self.trade_records: list[dict] = []
-        self.position_records: list[dict] = []
-        self.rebalance_records: list[dict] = []
+        super().__init__()
 
         # A股特有：T+1锁（记录每只股票的买入bar索引）
         self.buy_bar_index: dict[str, int] = {}
@@ -109,6 +100,29 @@ class AShareStrategy(bt.Strategy):
             return
         self.log(f"交易盈亏: 毛利={trade.pnl:.2f}, 净利={trade.pnlcomm:.2f}")
 
+    def adjust_target_weight(self, weight: float) -> float:
+        """
+        调整目标仓位（A股规则：禁止做空）。
+
+        Args:
+            weight: 原始目标权重
+
+        Returns:
+            调整后的目标权重（负权重转为0）
+        """
+        if weight < 0:
+            # A股规则：SELL信号（负权重）→ 减仓而非做空
+            # 负权重转换为"保留仓位"
+            # weight = -0.95 → 保留仓位 = 1 + (-0.95) = 0.05 (5%)
+            # weight = -0.70 → 保留仓位 = 1 + (-0.70) = 0.30 (30%)
+            # 置信度越高，保留仓位越少（减仓越多）
+            target_weight = 1 + weight  # 负权重转正
+            target_weight = max(0.0, target_weight)  # 确保非负
+            self.log(f"  ⚠️ 做空信号 {weight:.2%} → 保留仓位 {target_weight:.2%}（减仓{-weight:.2%}）")
+            return target_weight
+
+        return weight
+
     def _get_target_size(self, data, target_weight: float) -> int:
         """
         计算目标股数（A股规则：买入必须整手）。
@@ -134,6 +148,51 @@ class AShareStrategy(bt.Strategy):
 
         return target_size
 
+    def _get_target_size(self, data, target_weight: float) -> int:
+        """
+        计算目标股数（A股规则：买入必须整手）。
+
+        Args:
+            data: 数据源
+            target_weight: 目标权重
+
+        Returns:
+            目标股数（已取整到100的倍数）
+        """
+        portfolio_value = self.broker.getvalue()
+        current_price = data.close[0]
+
+        # 计算目标市值
+        target_value = portfolio_value * target_weight
+
+        # 计算目标股数
+        target_size = int(target_value / current_price)
+
+        # A股规则：向下取整到最接近的整手数（100股）
+        target_size = (target_size // 100) * 100
+
+        return target_size
+
+    def check_trading_rules(self, symbol: str, target_weight: float) -> bool:
+        """
+        检查交易规则（T+1限制）。
+
+        Args:
+            symbol: 股票代码
+            target_weight: 目标权重
+
+        Returns:
+            True: 可以交易
+            False: 不能交易（违反规则）
+        """
+        # T+1规则仅对卖出生效
+        # 如果是买入（weight > current_weight），无需检查
+        # 如果是卖出，需要检查 T+1 锁
+        if target_weight < 0 or (symbol in self.buy_bar_index):
+            return self._check_t1_lock(symbol)
+
+        return True
+
     def _check_t1_lock(self, symbol: str) -> bool:
         """
         检查是否满足T+1规则（买入后至少隔一个交易日才能卖出）。
@@ -153,6 +212,35 @@ class AShareStrategy(bt.Strategy):
 
         # T+1规则：必须至少跨越一个交易日
         return current_bar > buy_bar
+
+    def _check_t1_lock(self, symbol: str) -> bool:
+        """
+        检查是否满足T+1规则（买入后至少隔一个交易日才能卖出）。
+
+        Args:
+            symbol: 股票代码
+
+        Returns:
+            True: 可以卖出
+            False: 不能卖出（T+1限制）
+        """
+        if symbol not in self.buy_bar_index:
+            return True  # 没有买入记录，可以卖出
+
+        buy_bar = self.buy_bar_index[symbol]
+        current_bar = len(self)
+
+        # T+1规则：必须至少跨越一个交易日
+        return current_bar > buy_bar
+
+    def notify_order(self, order: bt.Order) -> None:
+        """订单状态通知（A股特有：记录买入bar索引）。"""
+        super().notify_order(order)
+
+        # A股特有：记录买入bar索引（用于T+1检查）
+        if order.status in [order.Completed] and order.isbuy():
+            symbol = self.datas[0]._name or "CSI300"
+            self.buy_bar_index[symbol] = len(self)
 
     def _execute_order(self, data, target_weight: float) -> None:
         """
@@ -200,100 +288,3 @@ class AShareStrategy(bt.Strategy):
             if sell_size > 0:
                 self.sell(data=data, size=sell_size)
                 self.log(f"  {symbol}: 卖出 {sell_size}股")
-
-    def next(self) -> None:
-        """每个bar执行的逻辑。"""
-        current_date = self.datas[0].datetime.date(0)
-        current_value = self.broker.getvalue()
-
-        # 记录每日资产价值
-        self.equity_curve.append({
-            "date": current_date,
-            "value": current_value,
-            "cash": self.broker.getcash(),
-        })
-
-        # 记录每日持仓
-        for data in self.datas:
-            pos = self.getposition(data)
-            self.position_records.append({
-                "date": current_date,
-                "symbol": data._name or "CSI300",
-                "position_size": pos.size,
-                "position_value": pos.size * data.close[0] if pos else 0,
-                "cash": self.broker.getcash(),
-                "total_value": current_value,
-                "close_price": data.close[0],
-            })
-
-        # 获取目标仓位
-        target_positions = self.params.target_positions
-        if not target_positions:
-            return
-
-        # 查找当前日期对应的目标仓位
-        target = None
-
-        for date_key, positions in target_positions.items():
-            # date_key可能是Timestamp或datetime
-            if hasattr(date_key, 'date'):
-                key_date = date_key.date() if hasattr(date_key, 'date') else date_key
-            else:
-                key_date = date_key
-
-            if key_date == current_date:
-                target = positions
-                break
-
-        if not target:
-            return
-
-        # 检查调仓频率
-        if self.last_rebalance is not None:
-            try:
-                days_since_last = (current_date - self.last_rebalance).days
-                if days_since_last < self.params.rebalance_freq:
-                    return
-            except (AttributeError, TypeError):
-                pass
-
-        self.last_rebalance = current_date
-
-        # 执行调仓
-        self.log(f"执行调仓, 目标仓位: {target}")
-
-        for data in self.datas:
-            symbol = data._name if hasattr(data, '_name') else "default"
-
-            if symbol in target:
-                weight = target[symbol]
-
-                # A股特有：调仓死区检查
-                pos = self.getposition(data)
-                current_weight = (pos.size * data.close[0] / current_value) if current_value > 0 else 0.0
-                weight_diff = abs(weight - current_weight)
-
-                if weight_diff < self.params.rebalance_threshold:
-                    self.log(f"  {symbol}: 死区跳过（变化{weight_diff:.2%}<{self.params.rebalance_threshold:.0%}）")
-                    continue
-
-                self.log(f"  {symbol}: 调整仓位 {current_weight:.2%}→{weight:.2%}")
-
-                # A股特有：执行订单
-                self._execute_order(data, weight)
-
-            else:
-                # 清仓
-                self.log(f"  {symbol}: 清仓")
-                pos = self.getposition(data)
-                if pos.size > 0:
-                    # 检查T+1
-                    if self._check_t1_lock(symbol):
-                        self.sell(data=data, size=pos.size)
-                    else:
-                        self.log(f"  ⚠️ {symbol}: T+1限制，不能清仓")
-
-    def stop(self) -> None:
-        """策略结束时调用。"""
-        final_value = self.broker.getvalue()
-        self.log(f"策略结束, 最终资产: {final_value:,.2f}", dt=self.datas[0].datetime.date(0))

@@ -54,17 +54,9 @@ tests/test_outputs/
 .coverage
 htmlcov/
 
-# 临时测试文件
-test_*.py
-!tests/
-
-# 备份文件
-*_backup.jsonl
-*_backup.*
-
-# 临时测试文件
-test_*.py
-!tests/
+# 临时测试文件（仅根目录）
+/test_*.py
+/analyze_*.py
 
 # 备份文件
 *_backup.jsonl

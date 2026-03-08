@@ -87,12 +87,6 @@ class SentimentPromptBuilder:
 
 请严格按照系统设定的 JSON 格式给出今日的交易信号："""
 
-    # 输出格式说明（更明确）
-    OUTPUT_FORMAT = '''{"signal":"buy"或"sell"或"hold","confidence":0.0到1.0之间的数字,"reason":"简短推理"}'''
-
-    # 简化版输出格式（默认）
-    SIMPLE_OUTPUT_FORMAT = '{"s":"b"或"s"或"h","c":0.0到1.0,"r":"推理"}'
-
     def __init__(
         self,
         use_simple_format: bool = False,
@@ -107,9 +101,6 @@ class SentimentPromptBuilder:
         """
         self.use_simple_format = use_simple_format
         self.system_prompt = custom_system_prompt or self.SYSTEM_PROMPT
-        self.output_format = (
-            self.SIMPLE_OUTPUT_FORMAT if use_simple_format else self.OUTPUT_FORMAT
-        )
 
     def build_prompt(
         self,
@@ -142,13 +133,12 @@ class SentimentPromptBuilder:
             date=date,
             market_context=market_context,
             news_text=news_text,
-            output_format=self.output_format,
         )
 
         return PromptTemplate(
             system_prompt=self.system_prompt,
             user_prompt_template=user_prompt,
-            output_format=self.output_format,
+            output_format="",  # 不再使用 output_format，由系统提示词控制
         )
 
     def build_messages(

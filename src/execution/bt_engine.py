@@ -30,6 +30,13 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 from pathlib import Path
 
+# 导入策略类和配置
+from .a_share_strategy import AShareStrategy
+from .us_market_strategy import USMarketStrategy
+from .a_share_sizer import AShareCommission
+from .us_market_sizer import USMarketCommission
+from ..config.market_config import MarketConfig, MarketType
+
 
 @dataclass
 class BacktestResult:
@@ -770,42 +777,98 @@ class BacktestEngine:
         self.cerebro.plot(**kwargs)
 
 
+def get_strategy_for_market(symbol: str):
+    """
+    根据股票代码获取策略类。
+
+    Args:
+        symbol: 股票代码
+
+    Returns:
+        对应的策略类（AShareStrategy 或 USMarketStrategy）
+    """
+    market_type = MarketConfig.get_market_type_for_symbol(symbol)
+
+    if market_type == MarketType.US_MARKET:
+        return USMarketStrategy
+    else:
+        return AShareStrategy
+
+
+def get_commission_for_market(symbol: str):
+    """
+    根据股票代码获取佣金计算器类。
+
+    Args:
+        symbol: 股票代码
+
+    Returns:
+        对应的佣金计算器类（AShareCommission 或 USMarketCommission）
+    """
+    market_type = MarketConfig.get_market_type_for_symbol(symbol)
+
+    if market_type == MarketType.US_MARKET:
+        return USMarketCommission()
+    else:
+        return AShareCommission()
+
+
 def run_backtest(
     ohlcv_data: pd.DataFrame,
     target_positions: dict,
     initial_cash: float = 100000.0,
     commission: float = 0.0002,
     strategy_params: Optional[dict] = None,
+    symbol: str = "CSI300",
 ) -> BacktestResult:
     """
     快速回测函数。
 
-    提供简化的接口执行单资产回测。
+    提供简化的接口执行单资产回测，自动根据symbol选择策略和费用计算器。
 
     Args:
         ohlcv_data: OHLCV 数据 DataFrame，索引为日期。
         target_positions: 目标仓位字典，格式 {datetime: {symbol: weight}}。
         initial_cash: 初始资金。
-        commission: 佣金率。
+        commission: 佣金率（仅A股使用，美股忽略此参数）。
         strategy_params: 策略额外参数。
+        symbol: 股票代码（用于自动选择策略）。
 
     Returns:
         BacktestResult 对象。
     """
     strategy_params = strategy_params or {}
 
-    # 创建引擎
-    engine = BacktestEngine(
-        initial_cash=initial_cash,
-        commission=commission,
-    )
+    # 获取市场配置
+    market_config = MarketConfig.get_config_for_symbol(symbol)
+
+    # 创建引擎（根据市场类型设置费用）
+    if market_config.market_type == MarketType.US_MARKET:
+        # 美股：使用美股佣金计算器
+        engine = BacktestEngine(
+            initial_cash=initial_cash,
+            commission=0.0,  # 美股零佣金，实际费用由 USMarketCommission 计算
+        )
+        # 添加美股佣金计算器（包含SEC费）
+        engine.cerebro.broker.addcommissioninfo(USMarketCommission())
+    else:
+        # A股：使用A股佣金计算器
+        engine = BacktestEngine(
+            initial_cash=initial_cash,
+            commission=commission,
+        )
+        # 添加A股佣金计算器（包含印花税）
+        engine.cerebro.broker.addcommissioninfo(AShareCommission())
 
     # 添加数据
-    engine.add_data(ohlcv_data, name="ASSET")
+    engine.add_data(ohlcv_data, name=symbol)
+
+    # 自动选择策略
+    strategy_class = get_strategy_for_market(symbol)
 
     # 添加策略
     engine.add_strategy(
-        DualTrackStrategy,
+        strategy_class,
         target_positions=target_positions,
         **strategy_params,
     )

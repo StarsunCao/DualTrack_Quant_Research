@@ -5,9 +5,34 @@
 backtest:
   # 默认资金配置
   initial_cash: 100000.0
-  commission: 0.0002      # 万分之二
+  commission: 0.0002      # 万分之二（A股默认）
   slippage_perc: 0.0     # 滑点
-  stamp_duty: 0.0        # 印花税
+  stamp_duty: 0.0        # 印花税（A股默认，实际由策略自动处理）
+
+  # 市场配置（新增）
+  market_config:
+    # A股市场配置
+    a_share:
+      allow_short_selling: false
+      t_plus_one: true
+      lot_size: 100
+      stamp_duty: 0.001      # 千分之一（仅卖出）
+      min_commission: 5.0    # 最低佣金 5 元
+      commission_rate: 0.0002
+      trading_calendar: "SSE"
+      timezone: "Asia/Shanghai"
+
+    # 美股市场配置
+    us_market:
+      allow_short_selling: true
+      t_plus_one: false      # T+0
+      lot_size: 0            # 无整手限制
+      stamp_duty: 0.0        # 无印花税
+      min_commission: 0.0    # 无最低佣金
+      commission_rate: 0.0   # 大部分券商零佣金
+      sec_fee_rate: 0.0000207  # SEC费率（仅卖出）
+      trading_calendar: "NASDAQ"
+      timezone: "America/New_York"
 
   # 调仓配置
   rebalancing:
@@ -53,9 +78,12 @@ multi_track:
     - "lr"
     - "lstm"
     - "lgb"
-    - "deepseek-v3"
+    - "deepseek-v3.2"
+    - "deepseek-v3.2-reasoning"
     - "deepseek-r1-14b"
     - "deepseek-r1-8b"
+    - "qwen3.5"
+    - "qwen3.5-9b"
 
   # 信号融合配置（独立运行时不使用）
   fusion:

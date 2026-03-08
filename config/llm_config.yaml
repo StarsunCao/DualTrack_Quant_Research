@@ -12,8 +12,8 @@ executors:
     temperature: 0.7
     max_tokens: 1024
 
-  deepseek-v3:
-    name: "DeepSeek V3"
+  deepseek-v3.2:
+    name: "DeepSeek V3.2"
     description: "DeepSeek V3.2 (通过SiliconFlow API)"
     type: "cloud"
     model: "deepseek-ai/DeepSeek-V3.2"
@@ -21,6 +21,19 @@ executors:
     timeout: 120
     temperature: 0.7
     max_tokens: 4096
+    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+
+  deepseek-v3.2-reasoning:
+    name: "DeepSeek V3.2 Reasoning"
+    description: "DeepSeek V3.2 Pro版 + 推理模式 (通过SiliconFlow API)"
+    type: "cloud"
+    model: "Pro/deepseek-ai/DeepSeek-V3.2"
+    base_url: "https://api.siliconflow.cn/v1"
+    timeout: 120
+    temperature: 0.7
+    max_tokens: 4096
+    reasoning: true
+    reasoning_effort: "medium"
     # API Key 从环境变量读取: SILICONFLOW_API_KEY
 
   deepseek-r1-14b:
@@ -39,6 +52,28 @@ executors:
     description: "DeepSeek R1 8B (通过SiliconFlow API)"
     type: "cloud"
     model: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+    base_url: "https://api.siliconflow.cn/v1"
+    timeout: 120
+    temperature: 0.7
+    max_tokens: 2048
+    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+
+  qwen3.5:
+    name: "Qwen3.5 397B"
+    description: "Qwen3.5 397B (满血版, 通过SiliconFlow API)"
+    type: "cloud"
+    model: "Qwen/Qwen3.5-397B-A17B"
+    base_url: "https://api.siliconflow.cn/v1"
+    timeout: 120
+    temperature: 0.7
+    max_tokens: 4096
+    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+
+  qwen3.5-9b:
+    name: "Qwen3.5 9B"
+    description: "Qwen3.5 9B (可部署版, 通过SiliconFlow API)"
+    type: "cloud"
+    model: "Qwen/Qwen3.5-9B"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 120
     temperature: 0.7
