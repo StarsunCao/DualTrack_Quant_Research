@@ -104,7 +104,16 @@ class SignalConverter:
             目标仓位字典 {datetime: {symbol: weight}}
         """
         positions = {}
-        signal_map = {"buy": 1.0, "sell": -1.0, "hold": 0.0}
+        # 信号映射（语义解耦版本）
+        # 注意：实际使用 signal_to_weight() 函数处理置信度
+        signal_map = {
+            "buy": 1.0,      # 建多仓
+            "neutral": 0.0,  # 清仓/持有现金（防御）
+            "short": -1.0,   # 主动做空（美股专用）
+            # 旧信号类型（向后兼容）
+            "sell": 0.0,     # 映射为清仓，避免过度做空
+            "hold": None,    # 保持现状
+        }
 
         if llm_signals.empty:
             return positions
@@ -130,27 +139,53 @@ class SignalConverter:
         if daily_df.empty:
             return positions
 
-        # 3. A股不对称仓位映射（核心修复）
-        # BUY: weight = confidence（按置信度建仓）
-        # HOLD: 不产生目标仓位（保持现状）
-        # SELL: weight = -confidence（将在bt_engine中处理为减仓）
+        # 3. 信号到仓位映射（语义解耦版本）
+        # ====================================================================
+        # 新信号类型（推荐）：
+        # - BUY: weight = +confidence（按置信度建多仓）
+        # - NEUTRAL: weight = 0（清仓/持有现金，防御性操作）
+        # - SHORT: weight = -confidence（主动做空，美股专用）
+        #
+        # 旧信号类型（向后兼容）：
+        # - HOLD: 不产生目标仓位（保持现状）
+        # - SELL: 负权重（美股触发做空，A股转换为减仓）
+        # ====================================================================
 
-        def signal_to_weight(signal: str, confidence: float) -> float:
+        def signal_to_weight(signal: str, confidence: float) -> Optional[float]:
             """
-            A股不对称仓位映射。
+            信号到权重的映射函数（语义解耦版本）。
+
+            核心改进：将"风险规避"（neutral）和"主动做空"（short）分离，
+            避免 LLM 对数值阈值感知迟钝导致的语义混乱。
 
             Args:
-                signal: 信号类型 (buy/sell/hold)
+                signal: 信号类型 (buy/neutral/short/hold/sell)
                 confidence: 置信度 (0.0-1.0)
 
             Returns:
                 目标权重（hold返回None，表示不调整仓位）
             """
-            if signal == "buy":
-                return confidence  # BUY: 置信度决定仓位
-            elif signal == "sell":
-                return -confidence  # SELL: 负权重，将在引擎中转换为减仓
-            else:  # hold
+            signal_lower = signal.lower().strip()
+
+            # 新信号类型（语义解耦）
+            if signal_lower == "buy":
+                return confidence  # BUY: 正权重，按置信度建多仓
+            elif signal_lower == "neutral":
+                # NEUTRAL: 清仓/持有现金，防御性操作
+                # 与 short 的区别：neutral 是风险规避，short 是主动做空
+                return 0.0
+            elif signal_lower == "short":
+                # SHORT: 主动做空（仅美股有效）
+                # 这是一种激进的看空赌注，仅在有系统性风险时使用
+                return -confidence
+
+            # 旧信号类型（向后兼容）
+            elif signal_lower == "sell":
+                # SELL: 旧版信号，保持兼容性
+                # 映射为 0（清仓）而非 -confidence，避免过度做空
+                # 注意：这是关键的语义修正！
+                return 0.0
+            else:  # hold 或其他
                 return None  # HOLD: 不产生目标仓位，保持现状
 
         # 应用映射

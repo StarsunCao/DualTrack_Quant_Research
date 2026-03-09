@@ -335,12 +335,16 @@ class DualTrackStrategy(bt.Strategy):
         target_positions: 目标仓位字典，格式为 {datetime: {symbol: weight}}
         rebalance_freq: 调仓频率（天数），默认为 1（每天调仓）
         printlog: 是否打印日志
+        allow_short: 是否允许做空，默认 False（A股规则）
+        short_confidence_threshold: 触发做空所需的最低置信度，默认 0.85
     """
 
     params = (
         ("target_positions", None),  # 目标仓位字典
         ("rebalance_freq", 1),  # 调仓频率
         ("printlog", True),  # 打印日志
+        ("allow_short", False),  # 是否允许做空（美股为True）
+        ("short_confidence_threshold", 0.85),  # 做空所需的最低置信度
     )
 
     def __init__(self) -> None:
@@ -501,8 +505,8 @@ class DualTrackStrategy(bt.Strategy):
                 }
                 self.rebalance_records.append(rebalance_record)
 
-        # 执行调仓（A股规则：禁止做空）
-        self.log(f"执行调仓, 目标仓位: {target}")
+        # 执行调仓（根据allow_short参数决定是否允许做空）
+        self.log(f"执行调仓, 目标仓位: {target}, 允许做空: {self.params.allow_short}")
 
         # 对每个数据源进行调仓
         for data in self.datas:
@@ -511,16 +515,32 @@ class DualTrackStrategy(bt.Strategy):
             if symbol in target:
                 weight = target[symbol]
 
-                # A股规则：SELL信号（负权重）→ 分级减仓而非清仓
+                # 处理负权重（sell信号）
                 if weight < 0:
-                    # 负权重转换为"保留仓位"
-                    # weight = -0.95 → 保留仓位 = 1 + (-0.95) = 0.05 (5%)
-                    # weight = -0.70 → 保留仓位 = 1 + (-0.70) = 0.30 (30%)
-                    # 置信度越高，保留仓位越少（减仓越多）
-                    target_weight = 1 + weight  # 负权重转正
-                    target_weight = max(0.0, target_weight)  # 确保非负
-                    self.log(f"  {symbol}: SELL信号 {weight:.2%} → 保留仓位 {target_weight:.2%}（减仓{-weight:.2%}）")
-                    weight = target_weight
+                    if self.params.allow_short:
+                        # 美股规则：需要检查置信度是否足够高才做空
+                        confidence = abs(weight)  # 负权重的绝对值即为置信度
+                        if confidence >= self.params.short_confidence_threshold:
+                            # 高置信度sell信号：触发做空
+                            self.log(f"  {symbol}: 高置信度做空 {weight:.2%}（置信度>{self.params.short_confidence_threshold:.0%}）")
+                            target_value = current_value * weight
+                            target_size = int(target_value / data.close[0])
+                            self.order_target_size(data=data, target=target_size)
+                            continue
+                        else:
+                            # 低置信度sell信号：仅清仓/减仓，不做空
+                            self.log(f"  {symbol}: 低置信度SELL {weight:.2%} → 清仓（不做空，置信度<{self.params.short_confidence_threshold:.0%}）")
+                            weight = 0.0  # 清仓
+                    else:
+                        # A股规则：SELL信号（负权重）→ 分级减仓而非做空
+                        # 负权重转换为"保留仓位"
+                        # weight = -0.95 → 保留仓位 = 1 + (-0.95) = 0.05 (5%)
+                        # weight = -0.70 → 保留仓位 = 1 + (-0.70) = 0.30 (30%)
+                        # 置信度越高，保留仓位越少（减仓越多）
+                        target_weight = 1 + weight  # 负权重转正
+                        target_weight = max(0.0, target_weight)  # 确保非负
+                        self.log(f"  {symbol}: SELL信号 {weight:.2%} → 保留仓位 {target_weight:.2%}（减仓{-weight:.2%}）")
+                        weight = target_weight
 
                 self.log(f"  {symbol}: 调整仓位至 {weight:.2%}")
                 self.order_target_percent(data=data, target=weight)

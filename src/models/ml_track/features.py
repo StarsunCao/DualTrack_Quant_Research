@@ -403,6 +403,10 @@ class FeatureEngineer:
         # 删除原始 OHLCV 列的特征名（保留原始数据）
         ohlcv_cols = ["open", "high", "low", "close", "volume"]
 
+        # 排除不相关的列（来自yfinance但数据稀疏）
+        exclude_cols = ["dividends", "stock splits", "capital gains", "symbol"]
+        result = result.drop(columns=[c for c in exclude_cols if c in result.columns], errors='ignore')
+
         # 记录特征名称
         self.feature_names = [col for col in result.columns if col not in ohlcv_cols]
 

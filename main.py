@@ -762,6 +762,16 @@ def run_backtest(
     click.echo("\n[Phase 5] 双轨独立回测...")
 
     from src.execution.bt_engine import BacktestEngine, DualTrackStrategy
+    from src.config.market_config import MarketConfig, MarketType
+
+    # 判断市场类型
+    market_type_enum = MarketConfig.get_market_type_for_symbol(symbol)
+    is_us_market = (market_type_enum == MarketType.US_MARKET)
+    click.echo(f"  市场类型: {'美股' if is_us_market else 'A股'}")
+
+    # 默认禁止做空（即使美股也默认减仓而非做空）
+    # 原因：LLM的sell信号更适合作为"防御性减仓"而非"主动性做空"
+    allow_short = False
 
     track_results = {}
 
@@ -780,6 +790,7 @@ def run_backtest(
                     DualTrackStrategy,
                     target_positions=positions,
                     printlog=verbose,
+                    allow_short=allow_short,
                 )
                 result = engine.run()
 
@@ -1158,13 +1169,24 @@ def cache_build(
         else:
             logger.warning(f"新闻数据文件不存在，无法加载宏观数据")
 
-        # 数据聚合：将多源新闻聚合为每日决策
-        logger.info("数据聚合: 将多源新闻聚合为每日决策...")
-
-        # 判断市场类型
+        # 判断市场类型（提前判断，用于VIX数据加载）
         from src.config.market_config import MarketConfig, MarketType
         market_type_enum = MarketConfig.get_market_type_for_symbol(symbol)
         market_type = "US_MARKET" if market_type_enum == MarketType.US_MARKET else "A_SHARE"
+
+        # 加载VIX波动率指数数据（美股专用）
+        vix_data = None
+        if market_type == "US_MARKET":
+            vix_path = Path("data/raw/vix_2015_2024.csv")
+            if vix_path.exists():
+                vix_data = pd.read_csv(vix_path, parse_dates=["Date"])
+                vix_data.set_index("Date", inplace=True)
+                logger.info(f"加载VIX数据: {len(vix_data)} 条")
+            else:
+                logger.warning(f"VIX数据文件不存在: {vix_path}")
+
+        # 数据聚合：将多源新闻聚合为每日决策
+        logger.info("数据聚合: 将多源新闻聚合为每日决策...")
         logger.info(f"市场类型: {market_type}")
 
         daily_news = DataAligner.aggregate_daily_news(
@@ -1227,6 +1249,13 @@ def cache_build(
                         }
                 macro_latest_cache[date] = latest_by_title
             logger.info(f"✓ 宏观数据缓存: {len(macro_latest_cache)} 个日期")
+
+        # 【性能优化4】预构建VIX数据字典（O(1)查找）
+        vix_dict = {}
+        if vix_data is not None:
+            for idx in vix_data.index:
+                vix_dict[idx.normalize()] = vix_data.loc[idx].to_dict()
+            logger.info(f"✓ VIX数据缓存: {len(vix_dict)} 条")
 
         # 为每一天生成market_context（包含昨日价格数据）
         enhanced_news_list = []
@@ -1307,12 +1336,39 @@ def cache_build(
                     if latest_macros:
                         macro_info = "\n- 宏观数据:\n" + "\n".join(latest_macros[:3])  # 最多显示3条
 
+            # 【美股专用】获取VIX波动率指数数据
+            vix_info = ""
+            if vix_dict:
+                vix = None
+                vix_date = None
+                # 查找T-1日或之前最近的VIX数据
+                for days_back in range(0, 16):
+                    check_date = t_minus_1.normalize() - pd.Timedelta(days=days_back)
+                    if check_date in vix_dict:
+                        vix = vix_dict[check_date]
+                        vix_date = check_date
+                        break
+
+                if vix is not None:
+                    vix_close = vix.get('Close', vix.get('close', 'N/A'))
+                    if isinstance(vix_close, (int, float)):
+                        # VIX状态判断
+                        if vix_close < 20:
+                            vix_status = "低波动"
+                        elif vix_close < 25:
+                            vix_status = "正常"
+                        else:
+                            vix_status = "高波动"
+
+                        date_note = f"({vix_date.date()})" if vix_date != t_minus_1.normalize() else ""
+                        vix_info = f"\n- VIX{date_note}: {vix_close:.2f} ({vix_status})"
+
             # 构建market_context（Markdown格式，匹配新闻格式）
             market_context = f"""### T-1日市场数据
 - 日期: {t_minus_1.date()}
 - 收盘价: {t_minus_1_ohlcv['close']:.2f} (涨跌幅: {(t_minus_1_ohlcv['close'] - t_minus_1_ohlcv['open']) / t_minus_1_ohlcv['open'] * 100:.2f}%)
 - 波动率: {(t_minus_1_ohlcv['high'] - t_minus_1_ohlcv['low']) / t_minus_1_ohlcv['close'] * 100:.2f}%
-- 成交量: {t_minus_1_ohlcv['volume']:,.0f}{northbound_info}{macro_info}
+- 成交量: {t_minus_1_ohlcv['volume']:,.0f}{northbound_info}{vix_info}{macro_info}
 
 注: 当前为T日({trading_day_T.date()})，使用T-1日数据做今日决策"""
 
@@ -1354,6 +1410,8 @@ def cache_build(
             model_tag = "qwen35"
         elif "Qwen3.5-9B" in model:
             model_tag = "qwen35_9b"
+        elif "GLM-5" in model or "glm-5" in model.lower():
+            model_tag = "glm5"
         elif "deepseek-reasoner" in model or model == "deepseek-chat":
             model_tag = "deepseek_official"
         else:

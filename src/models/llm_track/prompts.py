@@ -252,7 +252,7 @@ class TradingDecisionParser:
                 signal = parsed.get("decision", "hold").lower()
                 reasoning = parsed.get("rationale", parsed.get("reasoning", ""))
                 confidence = 0.6
-                result["signal"] = signal if signal in ["buy", "sell", "hold"] else "hold"
+                result["signal"] = signal if signal in ["buy", "sell", "hold", "neutral", "short"] else "hold"
                 result["confidence"] = confidence
                 result["reasoning"] = str(reasoning) if reasoning else "无推理说明"
                 result["parse_success"] = True
@@ -264,7 +264,7 @@ class TradingDecisionParser:
                 signal = parsed.get("rating", "hold").lower()
                 reasoning = parsed.get("summary", parsed.get("reason", ""))
                 confidence = 0.6
-                result["signal"] = signal if signal in ["buy", "sell", "hold"] else "hold"
+                result["signal"] = signal if signal in ["buy", "sell", "hold", "neutral", "short"] else "hold"
                 result["confidence"] = confidence
                 result["reasoning"] = str(reasoning) if reasoning else "无推理说明"
                 result["parse_success"] = True
@@ -295,7 +295,7 @@ class TradingDecisionParser:
                     reasoning = summary
 
                 confidence = 0.6  # 默认置信度
-                result["signal"] = signal if signal in ["buy", "sell", "hold"] else "hold"
+                result["signal"] = signal if signal in ["buy", "sell", "hold", "neutral", "short"] else "hold"
                 result["confidence"] = confidence
                 result["reasoning"] = str(reasoning) if reasoning else "无推理说明"
                 result["parse_success"] = True
@@ -310,11 +310,11 @@ class TradingDecisionParser:
             reasoning = parsed.get("reason", parsed.get("reasoning", parsed.get("r", "")))
 
             # 映射紧凑信号值
-            signal_map = {"b": "buy", "s": "sell", "h": "hold"}
+            signal_map = {"b": "buy", "s": "sell", "h": "hold", "n": "neutral", "sh": "short"}
             signal = signal_map.get(signal, signal)
 
             # 验证 signal
-            if signal in ["buy", "sell", "hold"]:
+            if signal in ["buy", "sell", "hold", "neutral", "short"]:
                 result["signal"] = signal
             else:
                 result["signal"] = "hold"
