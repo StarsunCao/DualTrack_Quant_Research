@@ -378,6 +378,14 @@ class LSTMModel(BaseModel):
         """
         start_time = time.time()
 
+        # 设置随机种子确保可复现性
+        torch.manual_seed(42)
+        np.random.seed(42)
+        if torch.backends.mps.is_available():
+            torch.mps.manual_seed(42)
+        elif torch.cuda.is_available():
+            torch.cuda.manual_seed(42)
+
         # 标准化特征
         self.scaler = StandardScaler()
         X_scaled = self.scaler.fit_transform(X)
