@@ -156,8 +156,19 @@ uv run python main.py run --track all --compare --symbol QQQ
 # 重新生成评估图表
 uv run python main.py evaluate
 
+# 生成高级学术评估报告
+uv run python main.py evaluate-advanced \
+  --output-dir docs/figures \
+  --vix-file data/raw/vix_2015_2024.csv \
+  --llm-cache-dir docs/cache/llm_responses
+
 # 构建 LLM 离线缓存
 uv run python main.py cache-build --symbol CSI300
+
+# 训练 ML 模型（持久化到 models/）
+uv run python scripts/train_ml_models.py --symbol CSI300
+uv run python scripts/train_ml_models.py --symbol QQQ
+uv run python scripts/train_ml_models.py --all  # 训练所有市场
 ```
 
 ### 多轨道对比报告示例
@@ -204,6 +215,51 @@ Qwen3.5-9B              950ms      $0.60      51
 
 ---
 
+## 高级学术评估框架
+
+Phase 8 新增四大评估维度，用于论文级别的深度分析：
+
+### 评估模块
+
+| 模块 | 功能 | 输出 |
+|------|------|------|
+| `trade_analyzer.py` | MAE/MFE 交易质量分析 | 入场效率、持仓效率、出场效率 |
+| `market_state_analyzer.py` | 市场状态切割分析 | Normal/High-Vol/Black-Swan 状态绩效 |
+| `ml_explainer.py` | ML 特征归因 | SHAP 重要性图 |
+| `llm_explainer.py` | LLM Reasoning 分析 | 词云、主题分布、质量评分 |
+| `cross_market_analyzer.py` | 跨市场对比 | A股 vs 美股雷达图 |
+| `attribution_comparator.py` | 归因对比 | ML vs LLM 归因差异 |
+| `advanced_visualizer.py` | 论文级可视化 | 300 DPI PNG 图表 |
+
+### 高级评估命令
+
+```bash
+# 生成完整高级评估报告
+uv run python main.py evaluate-advanced \
+  --output-dir docs/figures \
+  --vix-file data/raw/vix_2015_2024.csv \
+  --llm-cache-dir docs/cache/llm_responses
+
+# 预期输出图表
+docs/figures/
+├── trade_quality_comparison.png   # 交易质量对比
+├── market_state_heatmap.png       # 市场状态热力图
+├── ml_shap_importance.png         # ML SHAP 归因
+├── llm_reasoning_wordcloud.png    # LLM Reasoning 词云
+└── cross_market_radar.png         # 跨市场雷达图
+```
+
+### 学术话术提炼
+
+基于四大评估维度，提炼论文核心结论：
+
+1. **交易质量**: ML Track 入场效率高，LLM Track 持仓效率优
+2. **市场状态**: LLM 在 Black Swan 事件中显著降低 MaxDD
+3. **可解释性**: ML 提供特征归因，LLM 提供 Reasoning 主题
+4. **跨市场**: A股市场 LLM 优势更明显，美股 ML 略占优
+
+---
+
 ## 项目结构
 
 ```
@@ -234,7 +290,14 @@ src/
 ├── evaluation/        # 多维度评估
 │   ├── metrics_calculator.py  # 金融与工程指标计算
 │   ├── visualizer.py     # 论文图表生成
-│   └── report_generator.py # 报告生成
+│   ├── report_generator.py # 报告生成
+│   ├── trade_analyzer.py     # MAE/MFE 交易质量分析
+│   ├── market_state_analyzer.py # 市场状态切割
+│   ├── ml_explainer.py       # SHAP 特征归因
+│   ├── llm_explainer.py      # Reasoning 主题分析
+│   ├── cross_market_analyzer.py # 跨市场对比
+│   ├── attribution_comparator.py # 归因对比
+│   └── advanced_visualizer.py # 高级可视化
 ├── utils/             # 工具函数
 │   ├── logger.py          # 日志工具
 │   ├── config_loader.py   # 配置加载
@@ -249,7 +312,8 @@ config/                # 配置文件
 scripts/               # 数据处理脚本
 ├── fetch_financial_news.py   # 金融新闻获取
 ├── fetch_csi300_constituents.py # 沪深300成分股
-└── prepare_us_news.py    # 美股新闻准备
+├── prepare_us_news.py    # 美股新闻准备
+└── train_ml_models.py    # ML 模型训练脚本
 docs/
 ├── figures/           # 论文图表 (PNG, 300 DPI)
 ├── cache/llm_responses/ # LLM 离线缓存 (.jsonl)
@@ -352,9 +416,10 @@ docker-compose up -d
 | Phase 5: 执行引擎 | ✅ 完成 | Backtrader 回测封装 |
 | Phase 6: 评估 | ✅ 完成 | 多维度指标、可视化 |
 | Phase 7: CLI & Docker | ✅ 完成 | 多轨道CLI、容器化 |
+| Phase 8: 高级评估 | ✅ 完成 | 四大评估维度、论文级可视化 |
 
-**当前版本**: v2.1 多轨道对比平台
-**最后更新**: 2026-03-09
+**当前版本**: v2.2 高级学术评估平台
+**最后更新**: 2026-03-11
 **维护者**: DualTrack Research Team
 
 ---

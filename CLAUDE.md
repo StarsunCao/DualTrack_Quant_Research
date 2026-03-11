@@ -142,6 +142,13 @@ docker build -t dualtrack-quant .
 |-----|------|---------|
 | `metrics_calculator.py` | 多维度指标计算 | 金融指标 (Sharpe, MaxDD, WinRate)；工程指标 (Latency, Cost-per-Alpha) |
 | `visualizer.py` | 论文图表生成 | 资金曲线对比图、回撤热力图、延迟箱线图 |
+| `trade_analyzer.py` | 交易质量分析 | MAE/MFE 分析、入场/持仓/出场效率 |
+| `market_state_analyzer.py` | 市场状态分析 | Normal/High-Vol/Black-Swan 切割 |
+| `ml_explainer.py` | ML 特征归因 | SHAP 重要性分析 |
+| `llm_explainer.py` | LLM Reasoning 分析 | 词云生成、主题提取、质量评分 |
+| `cross_market_analyzer.py` | 跨市场对比 | A股 vs 美股雷达图 |
+| `attribution_comparator.py` | 归因对比器 | ML vs LLM 统一归因 |
+| `advanced_visualizer.py` | 高级可视化 | 论文级图表 (300 DPI) |
 
 **验证**: `tests/test_evaluation.py` - 指标计算验证、图表落盘检查 (assert >10KB)
 
@@ -150,7 +157,12 @@ docker build -t dualtrack-quant .
 docs/figures/
 ├── equity_curves.png      # 三策略资金曲线对比
 ├── drawdown_heatmap.png   # 最大回撤热力图
-└── latency_boxplot.png    # 延迟分布箱线图
+├── latency_boxplot.png    # 延迟分布箱线图
+├── trade_quality_comparison.png   # 交易质量对比
+├── market_state_heatmap.png       # 市场状态热力图
+├── ml_shap_importance.png         # ML SHAP 归因
+├── llm_reasoning_wordcloud.png    # LLM Reasoning 词云
+└── cross_market_radar.png         # 跨市场雷达图
 ```
 
 ---
@@ -162,7 +174,23 @@ docs/figures/
 |-------|------|
 | `python main.py run` | 执行完整回测流水线 (Phase 1-6) |
 | `python main.py evaluate` | 重新生成评估图表 |
+| `python main.py evaluate-advanced` | 生成高级学术评估报告 (Phase 8) |
 | `python main.py cache-build` | 构建 LLM 离线缓存 |
+
+**模型训练脚本**: `scripts/train_ml_models.py`
+
+```bash
+# 训练 A股模型
+uv run python scripts/train_ml_models.py --symbol CSI300
+
+# 训练美股模型
+uv run python scripts/train_ml_models.py --symbol QQQ
+
+# 训练所有市场
+uv run python scripts/train_ml_models.py --all
+```
+
+**模型保存位置**: `models/{symbol.lower()}_{model_type}/`
 
 **容器化**:
 - `Dockerfile`: Linux/CUDA 部署镜像
@@ -200,7 +228,14 @@ src/
 ├── evaluation/        # Phase 6: 多维度评估
 │   ├── metrics_calculator.py  # 金融与工程指标计算
 │   ├── visualizer.py     # 论文图表生成
-│   └── report_generator.py # 报告生成
+│   ├── report_generator.py # 报告生成
+│   ├── trade_analyzer.py     # MAE/MFE 交易质量分析
+│   ├── market_state_analyzer.py # 市场状态切割
+│   ├── ml_explainer.py       # SHAP 特征归因
+│   ├── llm_explainer.py      # Reasoning 主题分析
+│   ├── cross_market_analyzer.py # 跨市场对比
+│   ├── attribution_comparator.py # 归因对比
+│   └── advanced_visualizer.py # 高级可视化
 ├── utils/             # 工具函数
 │   ├── logger.py          # 日志工具
 │   ├── config_loader.py   # 配置加载
@@ -215,7 +250,8 @@ config/                # 配置文件
 scripts/               # 数据处理脚本
 ├── fetch_financial_news.py   # 金融新闻获取
 ├── fetch_csi300_constituents.py # 沪深300成分股
-└── prepare_us_news.py    # 美股新闻准备
+├── prepare_us_news.py    # 美股新闻准备
+└── train_ml_models.py    # ML 模型训练脚本
 docs/
 ├── figures/           # 论文图表 (PNG, 300 DPI)
 ├── cache/llm_responses/ # LLM 离线缓存 (.jsonl)
@@ -233,6 +269,7 @@ docs/
 | Orchestrator (Phase 4) | `test_orchestrator.py` | 否决机制、信号融合逻辑 |
 | Execution (Phase 5) | `test_bt_engine.py` | 订单成交验证、分析器提取 |
 | Evaluation (Phase 6) | `test_evaluation.py` | 指标计算、图表落盘检查 |
+| Advanced Evaluation | `test_advanced_evaluation.py` | MAE/MFE、市场状态、SHAP 归因 |
 | US Market | `test_us_market.py` | 美股市场回测验证 |
 | US News | `test_us_news_data.py` | 美股新闻数据处理 |
 | Backtest | `test_backtest.py` | 回测集成测试 |
@@ -283,5 +320,5 @@ docs/
 
 ---
 
-*Last Updated: 2026-03-09*
-*Project Status: Phase 7 Complete (Multi-Track & Multi-Market Ready)*
+*Last Updated: 2026-03-11*
+*Project Status: Phase 8 Complete (Advanced Academic Evaluation Framework)*
