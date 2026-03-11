@@ -571,6 +571,51 @@ class DataAligner:
             # 按原始日期排序（降序：最新的在前，更早的在后）
             group = group.sort_values(timestamp_col, ascending=False)
 
+            # 检测是否为美股市场格式（aggregated_content 非空，cctv_news/notices 为空或不存在）
+            has_us_format = (
+                'aggregated_content' in group.columns and
+                group['aggregated_content'].astype(str).str.strip().str.len().sum() > 0 and
+                (not 'cctv_news' in group.columns or group['cctv_news'].astype(str).str.strip().str.len().sum() == 0)
+            )
+
+            if has_us_format:
+                # 美股市场：直接合并 aggregated_content 字段
+                all_contents = []
+                total_news = 0
+                for _, row in group.iterrows():
+                    content = str(row.get('aggregated_content', '')).strip()
+                    if content:
+                        date_label = row[timestamp_col].strftime('%m-%d')
+                        # 添加日期标签
+                        all_contents.append(f"[{date_label}]\n{content}")
+                        total_news += row.get('news_count', 1)
+
+                # 合并内容，限制总长度
+                combined_content = "\n\n".join(all_contents)
+                content_limit = 5000
+                combined_content = combined_content[:content_limit]
+
+                # 取最新的新闻日期作为代表
+                news_date = group[timestamp_col].max()
+
+                # 合并标题
+                combined_title = "|".join(filter(None, group["aggregated_title"].astype(str)))[:300]
+
+                results.append(pd.Series({
+                    timestamp_col: news_date,  # T-1 新闻日期
+                    "trading_day": trading_day,  # T 交易日（决策日）
+                    "aggregated_title": combined_title,
+                    "aggregated_content": combined_content,
+                    "cctv_news": "",
+                    "notices": "",
+                    "news_count": total_news,
+                    "source_counts": json.dumps({"merged_days": len(group)}),
+                    "structured_summary": f"合并 {len(group)} 天新闻: {total_news}条",
+                }))
+                continue
+
+            # A股市场：原有的 CCTV 和公告合并逻辑
+
             # 按日期加权筛选：确保每个日期都有数据
             selected_indices = []
             date_position = 0

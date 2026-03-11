@@ -620,7 +620,7 @@ def run_backtest(
             from src.models.llm_track.agent import LLMTradingAgent
 
             # 使用DeepSeek R1 14B缓存
-            cache_path_deepseek_14b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_14b.jsonl")
+            cache_path_deepseek_14b = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_deepseek_r1_14b.jsonl")
 
             if cache_path_deepseek_14b.exists():
                 llm_r1_14b_agent = LLMTradingAgent(
@@ -1117,7 +1117,16 @@ def cache_build(
         # 加载新闻数据
         news_path = Path(news_file)
         if news_path.exists():
-            news_data = pd.read_csv(news_path, parse_dates=["timestamp"])
+            # 兼容 timestamp 和 date 两种列名
+            df_sample = pd.read_csv(news_path, nrows=1)
+            if "timestamp" in df_sample.columns:
+                news_data = pd.read_csv(news_path, parse_dates=["timestamp"])
+            elif "date" in df_sample.columns:
+                news_data = pd.read_csv(news_path, parse_dates=["date"])
+                news_data.rename(columns={"date": "timestamp"}, inplace=True)
+            else:
+                logger.error(f"新闻文件缺少 timestamp 或 date 列")
+                return
             logger.info(f"加载新闻: {len(news_data)} 条")
 
             # 过滤时间范围
@@ -1154,7 +1163,11 @@ def cache_build(
         # 加载宏观数据（定期发布的经济指标，每天展示最新的）
         macro_data = None
         if news_path.exists():
-            all_news = pd.read_csv(news_path, parse_dates=["timestamp"])
+            # 兼容 timestamp 和 date 列名
+            if "timestamp" in news_data.columns:
+                all_news = news_data
+            else:
+                all_news = pd.read_csv(news_path, parse_dates=["timestamp"])
             # 只有当 source 列存在时才筛选宏观数据
             if "source" in all_news.columns:
                 macro_data = all_news[all_news["source"] == "macro"].copy()
@@ -1397,15 +1410,15 @@ def cache_build(
         logger.info(f"使用模型: {model}")
 
         # 根据模型名称生成缓存文件名
-        # 提取模型标识：deepseek_v3_2, deepseek_v3_2_reasoning, deepseek_14b, deepseek_8b, qwen35, qwen35_9b
+        # 提取模型标识：deepseek_v3_2, deepseek_v3_2_reasoning, deepseek_r1_14b, deepseek_r1_8b, qwen35, qwen35_9b
         if "DeepSeek-V3.2" in model or "DeepSeek-V3" in model:
             model_tag = "deepseek_v3_2"
             if reasoning:
                 model_tag += "_reasoning"
         elif "DeepSeek-R1-Distill-Qwen-14B" in model:
-            model_tag = "deepseek_14b"
+            model_tag = "deepseek_r1_14b"
         elif "DeepSeek-R1-0528-Qwen3-8B" in model:
-            model_tag = "deepseek_8b"
+            model_tag = "deepseek_r1_8b"
         elif "Qwen3.5-397B" in model:
             model_tag = "qwen35"
         elif "Qwen3.5-9B" in model:

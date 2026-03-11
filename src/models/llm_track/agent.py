@@ -839,7 +839,8 @@ class LLMTradingAgent:
             }
 
             # 实时追加保存（支持断点续传）
-            if cache_path:
+            # 跳过缓存命中的记录，避免重复写入
+            if cache_path and result.get("latency_ms", 0) > 0:
                 self._append_to_cache(cache_path, result, news_text=news_text, market_context=news_market_context)
 
             return result
