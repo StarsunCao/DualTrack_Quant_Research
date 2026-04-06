@@ -92,9 +92,9 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 # ============================================================================
 @cli.command("run")
 @click.option("--track", "-t",
-              type=click.Choice(["lr", "lstm", "lgb", "deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b", "all"]),
+              type=click.Choice(["lr", "lstm", "lgb", "deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b", "glm-5", "all"]),
               default="all",
-              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, deepseek-v3.2=DeepSeek V3.2, deepseek-v3.2-reasoning=DeepSeek V3.2(推理模式), deepseek-r1-14b=DeepSeek R1 14B, deepseek-r1-8b=DeepSeek R1 8B, qwen3.5=Qwen3.5 397B满血版, qwen3.5-9b=Qwen3.5-9B, all=全部")
+              help="选择回测轨道: lr=LR, lstm=LSTM, lgb=LightGBM, deepseek-v3.2=DeepSeek V3.2, deepseek-v3.2-reasoning=DeepSeek V3.2(推理模式), deepseek-r1-14b=DeepSeek R1 14B, deepseek-r1-8b=DeepSeek R1 8B, qwen3.5=Qwen3.5 397B满血版, qwen3.5-9b=Qwen3.5-9B, glm-5=GLM-5(DashScope), all=全部")
 @click.option("--symbol", "-s", default="CSI300", help="交易标的 (CSI300/QQQ)")
 @click.option("--start", default="2020-01-02", help="回测开始日期")
 @click.option("--end", default="2024-12-31", help="回测结束日期")
@@ -130,6 +130,7 @@ def run_backtest(
         * deepseek-r1-8b: DeepSeek R1 8B (轻量版)
         * qwen3.5: Qwen3.5 397B (满血版)
         * qwen3.5-9b: Qwen3.5 9B (可部署版)
+        * glm-5: GLM-5 (DashScope, 阿里云)
 
       - all: 同时运行全部轨道
 
@@ -279,7 +280,7 @@ def run_backtest(
     # 确定要运行的轨道
     tracks_to_run = []
     if track == "all":
-        tracks_to_run = ["lr", "lstm", "lgb", "deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b"]
+        tracks_to_run = ["lr", "lstm", "lgb", "deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b", "glm-5"]
     else:
         tracks_to_run = [track]
 
@@ -725,6 +726,34 @@ def run_backtest(
             click.echo(f"  ⚠️ Qwen3.5-9B 失败，使用模拟信号: {e}")
             track_signals["qwen3.5-9b"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
 
+    # 轨道10: GLM-5 (DashScope)
+    if "glm-5" in tracks_to_run:
+        click.echo("\n[轨道 10/10] GLM-5 (DashScope) 信号生成...")
+        try:
+            from src.models.llm_track.agent import LLMTradingAgent
+
+            # 使用GLM-5缓存
+            cache_path_glm5 = Path(f"docs/cache/llm_responses/llm_cache_{symbol}_glm5.jsonl")
+
+            if cache_path_glm5.exists():
+                llm_glm5_agent = LLMTradingAgent(
+                    executor_type="dashscope",
+                    model="glm-5"
+                )
+                llm_glm5_agent._load_cache(cache_path_glm5)
+                click.echo(f"  使用GLM-5缓存: {cache_path_glm5}")
+                llm_glm5_signals = llm_glm5_agent.get_signals_from_cache(symbol=symbol)
+            else:
+                click.echo(f"  ⚠️ 未找到GLM-5缓存: {cache_path_glm5}")
+                click.echo(f"  请先运行: python main.py cache-build --executor dashscope --model glm-5 --symbol {symbol}")
+                llm_glm5_signals = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
+            track_signals["glm-5"] = llm_glm5_signals
+            click.echo(f"  ✅ GLM-5 信号: {len(llm_glm5_signals)} 条")
+        except Exception as e:
+            click.echo(f"  ⚠️ GLM-5 失败，使用模拟信号: {e}")
+            track_signals["glm-5"] = _generate_mock_llm_signals(symbol, len(ohlcv_data), ohlcv_data.index)
+
     # ================================================================
     # Phase 4: 信号转换 (独立运行，不融合！)
     # ================================================================
@@ -745,7 +774,7 @@ def run_backtest(
                 click.echo(f"  ⚠️ {track_name.upper()} 信号转换失败: {e}")
 
     # LLM Tracks 信号转换
-    for track_name in ["deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b"]:
+    for track_name in ["deepseek-v3.2", "deepseek-v3.2-reasoning", "deepseek-r1-14b", "deepseek-r1-8b", "qwen3.5", "qwen3.5-9b", "glm-5"]:
         if track_name in track_signals:
             try:
                 track_positions[track_name] = SignalConverter.llm_signals_to_positions(
@@ -1331,8 +1360,9 @@ def evaluate_advanced(
 @click.option("--end", default="2026-02-28", help="结束日期")
 @click.option("--news-file", default="data/raw/real_csi300_news_3m.csv", help="新闻数据文件路径")
 @click.option("--output-dir", default="docs/cache/llm_responses", help="缓存输出目录")
-@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "mock"]), help="LLM 执行器类型")
+@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "dashscope", "mock"]), help="LLM 执行器类型")
 @click.option("--model", default=None, help="LLM 模型名称（可选）")
+@click.option("--api-key", default=None, help="API Key（可选，如未提供则从环境变量读取）")
 @click.option("--reasoning", is_flag=True, help="开启推理模式（如支持）")
 @click.pass_context
 def cache_build(
@@ -1344,6 +1374,7 @@ def cache_build(
     output_dir: str,
     executor: str,
     model: Optional[str],
+    api_key: Optional[str],
     reasoning: bool,
 ) -> None:
     """
@@ -1664,6 +1695,8 @@ def cache_build(
                 model = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
             elif executor == "deepseek":
                 model = "deepseek-reasoner"  # 使用推理模型
+            elif executor == "dashscope":
+                model = "glm-5"  # 阿里云 DashScope GLM-5
             else:
                 model = "qwen2.5:7b"
 
@@ -1693,10 +1726,11 @@ def cache_build(
         cache_file = output_path / f"llm_cache_{symbol}_{model_tag}.jsonl"
         logger.info(f"缓存文件: {cache_file}")
 
-        # 初始化 LLM Agent（传递 reasoning 参数）
+        # 初始化 LLM Agent（传递 reasoning 和 api_key 参数）
         llm_agent = LLMTradingAgent(
             executor_type=executor,
             model=model,
+            api_key=api_key,
             reasoning=reasoning
         )
 

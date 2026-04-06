@@ -1,0 +1,46 @@
+% Chapter 7: Conclusion
+% Target: 2-3 pages (500-800 words)
+
+\section{Summary of Contributions}
+
+This thesis presented a comprehensive comparative study of machine learning and large language model approaches to quantitative trading. Our key contributions include:
+
+\begin{enumerate}
+    \item \textbf{Dual-Track Framework}: We designed and implemented a systematic framework enabling fair comparison between ML and LLM paradigms, with careful attention to reproducibility and avoiding look-ahead bias.
+
+    \item \textbf{Empirical Findings}: Through extensive backtesting on CSI300 and QQQ markets, we demonstrated that LLM-based strategies achieve superior risk-adjusted returns (Sharpe ratio 0.66 vs 0.17 on CSI300), while ML models offer better cost-efficiency and lower latency.
+
+    \item \textbf{Interpretability Analysis}: We provided dual interpretability through SHAP attribution for ML models and natural language reasoning for LLMs, addressing the ``black-box trust crisis'' in quantitative finance.
+
+    \item \textbf{Open-Source Implementation}: We released a complete, reproducible implementation including trained models, backtest results, and evaluation scripts.
+\end{enumerate}
+
+\section{Key Insights}
+
+Our findings reveal fundamental trade-offs between the two paradigms:
+
+\begin{description}
+    \item[Performance vs Cost] LLMs achieve better returns but at higher computational cost.
+    \item[Fitting vs Reasoning] ML models fit historical patterns; LLMs reason about market dynamics.
+    \item[Speed vs Interpretability] ML offers speed; LLMs offer explainability.
+\end{description}
+
+The choice between paradigms should be guided by specific application requirements:
+
+\begin{itemize}
+    \item For \textbf{low-frequency trading} where explainability matters, LLMs are preferred.
+    \item For \textbf{high-frequency trading} requiring low latency, ML models remain essential.
+    \item For \textbf{risk management} during market stress, a hybrid approach combining LLM veto with ML signals may be optimal.
+\end{itemize}
+
+\section{Final Remarks}
+
+The emergence of large language models represents a paradigm shift in quantitative finance. While traditional machine learning approaches have dominated the field for decades, LLMs offer a new paradigm based on semantic reasoning rather than pattern fitting.
+
+Our work provides the first systematic evidence that this paradigm shift can lead to improved trading performance. However, we also demonstrate that the two paradigms are not mutually exclusive---the future likely lies in hybrid systems that combine the strengths of both.
+
+As the field continues to evolve, we anticipate further improvements in both paradigms: more efficient LLMs with lower latency, and more sophisticated ML models with better generalization. The Dual-Track framework we propose provides a foundation for evaluating these advances in a fair and rigorous manner.
+
+\vspace{2em}
+
+\noindent\textit{``The best way to predict the future is to create it.''} --- Peter Drucker

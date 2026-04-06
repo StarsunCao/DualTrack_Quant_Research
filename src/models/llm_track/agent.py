@@ -670,6 +670,18 @@ class LLMTradingAgent:
                 timeout=timeout,
                 temperature=temperature,
             )
+        elif executor_type == "dashscope":
+            # DashScope (阿里云通义千问) 使用 OpenAI 兼容格式
+            # API Key 从 DASHSCOPE_API_KEY 环境变量读取
+            if api_key is None:
+                api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+            return DeepSeekExecutor(
+                model=model or "glm-5",
+                api_key=api_key,
+                base_url=base_url or "https://coding.dashscope.aliyuncs.com/v1",
+                timeout=timeout,
+                temperature=temperature,
+            )
         elif executor_type == "mock":
             return MockExecutor(model=model or "mock-model")
         else:

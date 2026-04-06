@@ -1,0 +1,17 @@
+% Abstract Chapter
+% Target: 300-500 words
+
+This thesis presents a comprehensive comparative study of two paradigms in quantitative trading: traditional machine learning (ML) approaches based on pattern fitting, and emerging large language model (LLM) approaches based on semantic reasoning.
+
+\textbf{Background}: The application of machine learning in quantitative finance has achieved significant success over the past decade, with models such as LSTM and gradient boosting becoming standard tools for price prediction. However, these approaches suffer from inherent limitations: they are purely data-driven, struggle to incorporate unstructured information (e.g., news, macroeconomic reports), and often fail to generalize during market regime changes. The emergence of large language models offers a new paradigm---instead of fitting historical patterns, LLMs can reason about market dynamics using natural language understanding.
+
+\textbf{Methodology}: We propose a Dual-Track framework that enables fair comparison between ML and LLM approaches. The ML Track implements three baseline models (Logistic Regression, LightGBM, LSTM) with 50+ technical indicators as features. The LLM Track employs state-of-the-art language models (DeepSeek V3.2, DeepSeek R1) with chain-of-thought prompting for investment decision-making. A fusion engine dynamically weights signals based on market volatility.
+
+\textbf{Experiments}: We conduct extensive backtests on two markets: CSI300 (Chinese A-share market, 2020--2024) and QQQ (US NASDAQ-100 ETF, 2018--2020). The evaluation framework includes financial metrics (Sharpe ratio, maximum drawdown), engineering metrics (latency, throughput), and advanced analysis (MAE/MFE, market state segmentation, SHAP attribution).
+
+\textbf{Key Findings}: (1) LLM approaches achieve superior risk-adjusted returns, with DeepSeek V3.2 attaining a Sharpe ratio of 0.66 on CSI300 compared to 0.17 for the best ML model (LSTM). (2) ML models demonstrate better cost-efficiency with sub-10ms latency versus 1--5 seconds for LLM inference. (3) LLM reasoning provides superior interpretability through natural language explanations, addressing the ``black-box trust crisis'' in quantitative finance.
+
+\textbf{Contributions}: This work provides the first systematic framework for comparing ML and LLM paradigms in quantitative trading, offers empirical evidence on the trade-offs between fitting and reasoning, and releases an open-source implementation for reproducibility.
+
+\vspace{1em}
+\noindent\textbf{Keywords}: Large Language Models, Quantitative Trading, Machine Learning, Natural Language Processing, Explainable AI, Financial Technology

@@ -1,0 +1,120 @@
+% Dual-Track Quant Research: Master's Thesis
+% Author: Cao Xinyang
+% Date: 2026-03-18
+
+\documentclass[12pt, a4paper, oneside]{report}
+
+% ============================================
+% Packages
+% ============================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath, amssymb}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{biblatex}
+
+% ============================================
+% Page Layout
+% ============================================
+\usepackage{geometry}
+\geometry{
+    top=2.5cm,
+    bottom=2.5cm,
+    left=3cm,
+    right=2.5cm
+}
+
+% Line spacing
+\usepackage{setspace}
+\onehalfspacing
+
+% ============================================
+% Code Listing Style
+% ============================================
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red},
+    showstringspaces=false
+}
+
+% ============================================
+% Bibliography
+% ============================================
+\addbibresource{references.bib}
+
+% ============================================
+% Title Page
+% ============================================
+\title{
+    \textbf{Dual-Track Quantitative Trading Framework:}\\
+    \textbf{A Comparative Study of Machine Learning and\\Large Language Model Approaches}
+}
+\author{Cao Xinyang\\[0.5cm]
+    \small Student ID: 321793\\[0.3cm]
+    \small Supervisor: Prof. [Supervisor Name]
+}
+\date{March 2026}
+
+\begin{document}
+
+% ============================================
+% Front Matter
+% ============================================
+\maketitle
+
+\begin{abstract}
+\input{chapters/0_abstract}
+\end{abstract}
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+% ============================================
+% Main Chapters
+% ============================================
+\chapter{Introduction}
+\input{chapters/1_introduction}
+
+\chapter{Related Work}
+\input{chapters/2_related_work}
+
+\chapter{Methodology}
+\input{chapters/3_methodology}
+
+\chapter{Experimental Setup}
+\input{chapters/4_experimental_setup}
+
+\chapter{Results and Analysis}
+\input{chapters/5_results}
+
+\chapter{Discussion}
+\input{chapters/6_discussion}
+
+\chapter{Conclusion}
+\input{chapters/7_conclusion}
+
+% ============================================
+% Back Matter
+% ============================================
+\printbibliography[heading=bibintoc, title={References}]
+
+\appendix
+\chapter{Supplementary Materials}
+\input{chapters/appendix}
+
+\end{document}
