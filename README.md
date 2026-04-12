@@ -25,13 +25,13 @@ DualTrack is a Python 3.12+ dual-track quantitative backtesting framework that s
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    DualTrack Testbed                         │
-├─────────────────────────────────────────────────────────────┤
-│  ML Tracks                             LLM Tracks             │
+┌────────────────────────────────────────────────────────────┐
+│                    DualTrack Testbed                       │
+├────────────────────────────────────────────────────────────┤
+│  ML Tracks                             LLM Tracks          │
 │  ┌──────┐ ┌──────┐ ┌──────┐    ┌─────────┐ ┌─────────┐     │
 │  │ LR   │ │LSTM  │ │ LGB  │    │DeepSeek │ │  Qwen   │     │
-│  │(Linear)│(Seq.) │(Ensemble)  │ R1/GLM  │ │ Series  │     │
+│  │(Linear)│(Seq.)│(Ensemble)   │ R1/GLM  │ │ Series  │     │
 │  └──┬───┘ └──┬───┘ └──┬───┘    └────┬────┘ └────┬────┘     │
 │     └────────┼────────┘             └─────┬──────┘         │
 │              ▼                            ▼                │
