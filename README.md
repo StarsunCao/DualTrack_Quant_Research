@@ -1,114 +1,118 @@
+[中文](README_zh.md) | [English](README.md) | [Русский](README_ru.md)
+
+---
+
 # DualTrack Quant Research
 
-**多轨道量化交易对比实验平台** —— 严格对比传统机器学习（Fitting）与大语言模型（Semantic Reasoning）在量化交易中的 ROI、鲁棒性与工程可行性，特别是在黑天鹅事件下的表现。
+**Multi-Track Quantitative Trading Comparison Platform** — Strictly compares traditional machine learning (Fitting) and large language models (Semantic Reasoning) in terms of ROI, robustness, and engineering feasibility in quantitative trading, especially during black swan events.
 
-> **核心定位**: 本项目不是融合策略，而是对比实验的**工程基础设施（Testbed）**，建立公平竞技场让"拟合"与"推理"在同一市场条件下展开对决。
-
----
-
-## 项目概述
-
-DualTrack 是一个基于 Python 3.12+ 的双轨制量化回测框架，支持：
-
-- **3 种机器学习模型**: Logistic Regression, LSTM, LightGBM
-- **7+ 种大语言模型**: DeepSeek V3.2/R1-14B/R1-8B、Qwen3.5、GLM-5 等，支持云端与本地部署
-- **2 个市场**: A股 (CSI300) 和美股 (QQQ/NASDAQ-100)
-- **独立轨道回测**: 每个模型独立生成信号、独立回测，不做信号融合
-- **多维度评估**: 金融指标 (Sharpe, MaxDD, WinRate) + 工程指标 (Latency, Cost)
+> **Core Positioning**: This project is not a fusion strategy, but an **engineering infrastructure (Testbed)** for comparative experiments, establishing a fair arena where "fitting" and "reasoning" compete under the same market conditions.
 
 ---
 
-## 架构
+## Overview
+
+DualTrack is a Python 3.12+ dual-track quantitative backtesting framework that supports:
+
+- **3 Machine Learning Models**: Logistic Regression, LSTM, LightGBM
+- **7+ Large Language Models**: DeepSeek V3.2/R1-14B/R1-8B, Qwen3.5, GLM-5, etc., with cloud and local deployment
+- **2 Markets**: A-Shares (CSI300) and US Stocks (QQQ/NASDAQ-100)
+- **Independent Track Backtesting**: Each model generates signals and backtests independently, no signal fusion
+- **Multi-Dimensional Evaluation**: Financial metrics (Sharpe, MaxDD, WinRate) + Engineering metrics (Latency, Cost)
+
+---
+
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    DualTrack 测试平台                        │
+│                    DualTrack Testbed                         │
 ├─────────────────────────────────────────────────────────────┤
-│  ML 轨道                              LLM 轨道               │
+│  ML Tracks                             LLM Tracks             │
 │  ┌──────┐ ┌──────┐ ┌──────┐    ┌─────────┐ ┌─────────┐     │
 │  │ LR   │ │LSTM  │ │ LGB  │    │DeepSeek │ │  Qwen   │     │
-│  │(线性) │ │(序列)│ │(集成) │    │  R1/GLM │ │  系列    │     │
+│  │(Linear)│(Seq.) │(Ensemble)  │ R1/GLM  │ │ Series  │     │
 │  └──┬───┘ └──┬───┘ └──┬───┘    └────┬────┘ └────┬────┘     │
 │     └────────┼────────┘             └─────┬──────┘         │
 │              ▼                            ▼                │
 │  ┌──────────────────────┐  ┌──────────────────────────┐    │
 │  │  Signal Converter    │  │  Signal Converter        │    │
-│  │  (ML → 目标仓位)      │  │  (LLM → 目标仓位)          │    │
+│  │  (ML → Target Pos.)  │  │  (LLM → Target Pos.)     │    │
 │  └──────────┬───────────┘  └────────────┬─────────────┘    │
 │             └─────────────┬─────────────┘                  │
 │                           ▼                                │
 │              ┌─────────────────────────┐                   │
-│              │   Backtrader 回测引擎    │                   │
-│              │  独立回测 + 绩效计算       │                   │
+│              │   Backtrader Engine     │                   │
+│              │  Indep. Backtest + P&L  │                   │
 │              └─────────────────────────┘                   │
 └────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 支持的模型
+## Supported Models
 
-### ML 轨道 (机器学习)
+### ML Tracks (Machine Learning)
 
-| 模型 | 类型 | 特点 |
-|------|------|------|
-| `lr` | Logistic Regression | 线性基线，速度极快 |
-| `lstm` | LSTM (PyTorch, MPS加速) | 时序建模，Apple Silicon 优化 |
-| `lgb` | LightGBM | 集成学习，特征重要性可解释 |
+| Model | Type | Features |
+|-------|------|----------|
+| `lr` | Logistic Regression | Linear baseline, extremely fast |
+| `lstm` | LSTM (PyTorch, MPS-accelerated) | Sequential modeling, Apple Silicon optimized |
+| `lgb` | LightGBM | Ensemble learning, feature importance interpretable |
 
-### LLM 轨道 (大语言模型)
+### LLM Tracks (Large Language Models)
 
-| 模型 | 部署方式 | 实验市场 | 说明 |
-|------|---------|---------|------|
-| `deepseek-v3.2` | 云端 (SiliconFlow) | A股 + 美股 | DeepSeek V3.2 标准版 |
-| `deepseek-v3.2-reasoning` | 云端 (SiliconFlow) | A股 + 美股 | DeepSeek V3.2 推理模式 |
-| `deepseek-r1-14b` | 本地 (Ollama) | A股 + 美股 | DeepSeek R1 14B 蒸馏版 |
-| `deepseek-r1-8b` | 本地 (Ollama) | A股 + 美股 | DeepSeek R1 8B 轻量版 |
-| `qwen3.5` | 云端 (SiliconFlow) | 仅美股 | Qwen3.5 397B 满血版 |
-| `qwen3.5-9b` | 本地 (Ollama) | 待实验 | Qwen3.5 9B 可部署版 |
-| `glm-5` | 云端 (SiliconFlow / DashScope) | 仅美股 | GLM-5 |
+| Model | Deployment | Tested Markets | Description |
+|-------|-----------|----------------|-------------|
+| `deepseek-v3.2` | Cloud (SiliconFlow) | A-Shares + US | DeepSeek V3.2 standard |
+| `deepseek-v3.2-reasoning` | Cloud (SiliconFlow) | A-Shares + US | DeepSeek V3.2 reasoning mode |
+| `deepseek-r1-14b` | Local (Ollama) | A-Shares + US | DeepSeek R1 14B distilled |
+| `deepseek-r1-8b` | Local (Ollama) | A-Shares + US | DeepSeek R1 8B lightweight |
+| `qwen3.5` | Cloud (SiliconFlow) | US only | Qwen3.5 397B full version |
+| `qwen3.5-9b` | Local (Ollama) | Pending | Qwen3.5 9B deployable |
+| `glm-5` | Cloud (SiliconFlow / DashScope) | US only | GLM-5 |
 
-> **本地部署设备**: MacBook Air M2 (24GB 内存 + 512GB 存储)
+> **Local Deployment Device**: MacBook Air M2 (24GB RAM + 512GB SSD)
 >
-> **Qwen 模型说明**: 因可能触发政治敏感词，Qwen 系列未用于 A股 市场实验，仅在美股市场进行测试。
+> **Qwen Note**: Due to potential political sensitivity triggers, Qwen models were not tested on the A-Shares market, only on US stocks.
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 安装
+### Installation
 
-**本项目使用 `uv` 作为包管理器（禁止使用 pip）**
+**This project uses `uv` as the package manager (pip is not allowed)**
 
 ```bash
-# 安装 uv
+# Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 克隆仓库并安装依赖
+# Clone and install dependencies
 git clone https://github.com/StarsunCao/DualTrack_Quant_Research.git
 cd DualTrack_Quant_Research
 uv sync
 ```
 
-### 运行回测
+### Running Backtests
 
 ```bash
-# 单模型回测
+# Single model backtest
 uv run python main.py run --track lr --symbol CSI300
 uv run python main.py run --track lstm --symbol CSI300
 uv run python main.py run --track lgb --symbol QQQ
 
-# LLM 模型回测（需要有效缓存或 API）
+# LLM model backtest (requires valid cache or API)
 uv run python main.py run --track deepseek-v3.2 --symbol CSI300
 uv run python main.py run --track glm-5 --symbol QQQ
 
-# 全模型对比（需要所有模型的 LLM 缓存已就绪）
+# Full model comparison (requires all LLM caches ready)
 uv run python main.py run --track all --compare --symbol CSI300
 ```
 
-### 构建 LLM 缓存
+### Building LLM Cache
 
-LLM API 调用成本高，项目支持离线缓存机制（断点续传）：
+LLM API calls are expensive; the project supports offline caching with resume capability:
 
 ```bash
 uv run python main.py cache-build \
@@ -120,70 +124,70 @@ uv run python main.py cache-build \
   --model deepseek-ai/DeepSeek-V3.2
 ```
 
-### 训练 ML 模型
+### Training ML Models
 
 ```bash
 uv run python scripts/train_ml_models.py --symbol CSI300
 uv run python scripts/train_ml_models.py --symbol QQQ
-uv run python scripts/train_ml_models.py --all  # 训练所有市场
+uv run python scripts/train_ml_models.py --all  # Train all markets
 ```
 
-### 评估与可视化
+### Evaluation & Visualization
 
 ```bash
-# 从已有回测结果生成评估图表
+# Generate evaluation charts from existing backtest results
 uv run python main.py evaluate
 
-# 高级学术评估（MAE/MFE、市场状态切割、SHAP 归因等）
+# Advanced academic evaluation (MAE/MFE, market state segmentation, SHAP attribution)
 uv run python main.py evaluate-advanced \
   --output-dir docs/figures \
   --vix-file data/raw/vix_2015_2024.csv
 ```
 
-### 环境变量
+### Environment Variables
 
 ```bash
-# SiliconFlow API（DeepSeek / Qwen / GLM-5 云端调用）
+# SiliconFlow API (DeepSeek / Qwen / GLM-5 cloud)
 export SILICONFLOW_API_KEY="your-key-here"
 
-# 阿里云 DashScope（GLM-5 备选端点）
+# Alibaba DashScope (GLM-5 alternative endpoint)
 export DASHSCOPE_API_KEY="your-key-here"
 
-# 本地 Ollama 服务
+# Local Ollama service
 export OLLAMA_HOST="http://localhost:11434"
 ```
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
-├── main.py                    # CLI 入口
-├── pyproject.toml             # 依赖管理 (uv)
+├── main.py                    # CLI entry point
+├── pyproject.toml             # Dependency management (uv)
 ├── src/
-│   ├── data/                  # 数据获取与对齐
+│   ├── data/                  # Data acquisition and alignment
 │   │   ├── market_data.py     # OHLCV (akshare, yfinance)
-│   │   ├── news_data.py       # 新闻/情绪数据
-│   │   └── data_aligner.py    # 时间对齐
+│   │   ├── news_data.py       # News / sentiment data
+│   │   └── data_aligner.py    # Time alignment
 │   ├── models/
-│   │   ├── ml_track/          # ML 轨道
-│   │   │   ├── features.py    # 50+ 技术指标
+│   │   ├── ml_track/          # ML tracks
+│   │   │   ├── features.py    # 50+ technical indicators
 │   │   │   └── baselines.py   # LR, LSTM, LightGBM
-│   │   ├── llm_track/         # LLM 轨道
-│   │   │   ├── prompts.py     # A股 CoT 提示词
-│   │   │   ├── us_prompts.py  # 美股提示词
-│   │   │   └── agent.py       # 多模型执行器
+│   │   ├── llm_track/         # LLM tracks
+│   │   │   ├── prompts.py     # A-Shares CoT prompts
+│   │   │   ├── us_prompts.py  # US market prompts
+│   │   │   └── agent.py       # Multi-model executors
 │   │   └── model_manager.py
-│   ├── orchestrator/          # 信号编排
-│   │   ├── fusion_engine.py   # 信号融合引擎
+│   ├── orchestrator/          # Signal orchestration
+│   │   ├── fusion_engine.py   # Signal fusion engine
 │   │   ├── signal_converter.py
 │   │   └── comparator.py
-│   ├── execution/             # 回测执行
-│   │   ├── bt_engine.py       # Backtrader 封装
+│   ├── execution/             # Backtest execution
+│   │   ├── bt_engine.py       # Backtrader wrapper
 │   │   ├── base_strategy.py
 │   │   ├── a_share_strategy.py
 │   │   └── us_market_strategy.py
-│   └── evaluation/            # 多维度评估
+│   └── evaluation/            # Multi-dimensional evaluation
 │       ├── metrics_calculator.py
 │       ├── visualizer.py
 │       ├── trade_analyzer.py
@@ -191,82 +195,82 @@ export OLLAMA_HOST="http://localhost:11434"
 │       ├── ml_explainer.py
 │       ├── llm_explainer.py
 │       └── cross_market_analyzer.py
-├── config/                    # YAML 配置
+├── config/                    # YAML configuration
 │   ├── llm_config.yaml
 │   ├── ml_config.yaml
 │   ├── data_config.yaml
 │   └── backtest_config.yaml
-├── scripts/                   # 数据处理与训练脚本
+├── scripts/                   # Data processing and training scripts
 │   ├── train_ml_models.py
 │   ├── fetch_financial_news.py
 │   └── prepare_us_news.py
-├── models/                    # 预训练模型
-├── tests/                     # 单元测试
-└── data/                      # 数据文件 (.gitignore)
+├── models/                    # Pre-trained models
+├── tests/                     # Unit tests
+└── data/                      # Data files (.gitignore)
 ```
 
 ---
 
-## 关键设计
+## Key Design Principles
 
-### 1. 无未来函数（No Look-ahead Bias）
+### 1. No Look-ahead Bias
 
-特征工程使用 `shift()` 确保只使用历史数据，信号对齐使用 `ffill` 前向填充。
+Feature engineering uses `shift()` to ensure only historical data is used; signal alignment uses `ffill` forward filling.
 
-### 2. 独立轨道（No Fusion）
+### 2. Independent Tracks (No Fusion)
 
-每个模型独立生成信号、独立转换仓位、独立回测。不做信号融合，确保对比公平。
+Each model generates signals, converts positions, and backtests independently. No signal fusion ensures fair comparison.
 
-### 3. LLM 离线缓存
+### 3. LLM Offline Caching
 
-LLM API 调用昂贵且不稳定，项目支持 `.jsonl` 格式的离线缓存，支持断点续传。
+LLM API calls are expensive and unstable; the project supports `.jsonl` format offline caching with resume capability.
 
-### 4. Apple Silicon 优化
+### 4. Apple Silicon Optimization
 
-PyTorch LSTM 模型自动检测并使用 MPS (Metal Performance Shaders) 加速。
-
----
-
-## 评估维度
-
-| 维度 | 说明 |
-|------|------|
-| **收益能力** | Sharpe Ratio, Sortino Ratio, Calmar Ratio, 总收益率 |
-| **风险控制** | Maximum Drawdown, 回撤持续期, 黑天鹅期间表现 |
-| **交易质量** | MAE/MFE 分析, 入场/持仓/出场效率 |
-| **工程指标** | 推理延迟, 吞吐量, 每个 Alpha 信号成本 |
-| **市场状态** | Normal / High-Vol / Black-Swan 状态下的分场景表现 |
-| **可解释性** | ML: SHAP 特征归因; LLM: Reasoning 主题分析 |
+PyTorch LSTM models automatically detect and use MPS (Metal Performance Shaders) acceleration.
 
 ---
 
-## 核心研究问题
+## Evaluation Dimensions
 
-1. **拟合 vs 推理**: 传统 ML 和 LLM 哪种范式更适合量化交易？
-2. **速度 vs 智能**: 低延迟的拟合 vs 高延迟的推理，哪个更优？
-3. **云端 vs 本地**: LLM 的语义理解是否值得额外的 API 成本？
-4. **模型规模**: 不同参数量的 LLM 在量化任务中的表现差异？
-5. **黑天鹅事件**: LLM 的语义理解能否在极端行情中提供尾部保护？
-6. **跨市场泛化**: 同一套系统能否同时适用于 A股 和美股？
+| Dimension | Description |
+|-----------|-------------|
+| **Return Capability** | Sharpe Ratio, Sortino Ratio, Calmar Ratio, Total Return |
+| **Risk Control** | Maximum Drawdown, drawdown duration, black swan period performance |
+| **Trade Quality** | MAE/MFE analysis, entry/hold/exit efficiency |
+| **Engineering Metrics** | Inference latency, throughput, cost per alpha signal |
+| **Market State** | Performance under Normal / High-Vol / Black-Swan conditions |
+| **Interpretability** | ML: SHAP feature attribution; LLM: Reasoning topic analysis |
 
 ---
 
-## 测试
+## Core Research Questions
+
+1. **Fitting vs Reasoning**: Which paradigm is more suitable for quantitative trading — traditional ML or LLMs?
+2. **Speed vs Intelligence**: Low-latency fitting vs high-latency reasoning, which wins?
+3. **Cloud vs Local**: Is LLM semantic understanding worth the extra API cost?
+4. **Model Scale**: How do LLMs of different parameter sizes perform in quant tasks?
+5. **Black Swan Events**: Can LLM semantic understanding provide tail protection during extreme market conditions?
+6. **Cross-Market Generalization**: Can the same system work for both A-Shares and US stocks?
+
+---
+
+## Testing
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-包含数据获取、ML 轨道、LLM 轨道、信号融合、回测引擎、评估模块等完整测试覆盖。
+Comprehensive test coverage including data acquisition, ML tracks, LLM tracks, signal fusion, backtest engine, and evaluation modules.
 
 ---
 
-## Docker 部署
+## Docker Deployment
 
-Docker 镜像仅用于 Linux/CUDA 云端部署，Apple Silicon Mac 用户请直接使用 `uv`：
+Docker images are for Linux/CUDA cloud deployment only. Apple Silicon Mac users should use `uv` directly:
 
 ```bash
-# Apple Silicon Mac 推荐方式
+# Apple Silicon Mac (recommended)
 uv sync
 uv run python main.py run --track lr --symbol CSI300
 
@@ -277,18 +281,18 @@ docker run --rm dualtrack-quant python main.py run --track all --compare --symbo
 
 ---
 
-## 项目状态
+## Project Status
 
-| 阶段 | 状态 | 描述 |
-|------|------|------|
-| Phase 1: 数据层 | ✅ 完成 | OHLCV 获取、新闻数据、时间对齐 |
-| Phase 2: ML 轨道 | ✅ 完成 | LR, LSTM, LightGBM |
-| Phase 3: LLM 轨道 | ✅ 完成 | DeepSeek, Qwen, GLM-5, Ollama |
-| Phase 4: 编排器 | ✅ 完成 | 独立信号转换 |
-| Phase 5: 执行引擎 | ✅ 完成 | Backtrader 回测封装 |
-| Phase 6: 评估 | ✅ 完成 | 多维度指标、可视化 |
-| Phase 7: CLI & Docker | ✅ 完成 | 多轨道 CLI、容器化 |
-| Phase 8: 高级评估 | ✅ 完成 | MAE/MFE、市场状态切割、SHAP 归因 |
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1: Data Layer | ✅ Done | OHLCV acquisition, news data, time alignment |
+| Phase 2: ML Tracks | ✅ Done | LR, LSTM, LightGBM |
+| Phase 3: LLM Tracks | ✅ Done | DeepSeek, Qwen, GLM-5, Ollama |
+| Phase 4: Orchestrator | ✅ Done | Independent signal conversion |
+| Phase 5: Execution Engine | ✅ Done | Backtrader backtest wrapper |
+| Phase 6: Evaluation | ✅ Done | Multi-dimensional metrics, visualization |
+| Phase 7: CLI & Docker | ✅ Done | Multi-track CLI, containerization |
+| Phase 8: Advanced Evaluation | ✅ Done | MAE/MFE, market state segmentation, SHAP attribution |
 
 ---
 
