@@ -23,6 +23,127 @@ class PromptTemplate:
     output_format: str
 
 
+class SmartPromptBuilder:
+    """
+    状态增强型 Smart Prompt 构建器。
+
+    在 SentimentPromptBuilder 的基础上，增加对技术指标、价格序列、
+    历史决策记忆的注入，使 LLM 在单次调用中做"类 Agent"的结构化推理。
+
+    核心差异:
+    - system prompt 含决策权重指引（冲突仲裁规则）
+    - user prompt 额外注入技术指标摘要、近 N 日价格走势、决策记忆+反馈
+    """
+
+    SYSTEM_PROMPT = """你是一个顶级的量化交易策略分析师。你的核心任务是：基于 T-1 日的量价数据、技术指标与市场新闻，通过深度语义推理，给出 T 日的交易决策。
+
+【核心决策逻辑与风控原则】
+请综合评估技术面与消息面的共振效应。你的优势在于理解新闻背后的"隐藏风险"与"情绪周期"：
+- buy: 技术面展现企稳或上攻动能 + 消息面存在实质性利好。
+- sell (防守第一): 只要侦测到以下任意高危信号，必须果断避险：
+  1. 技术面破位（如放量下跌、均线空头排列）。
+  2. 消息面出现"黑天鹅"或系统性风险。
+  3. 宏观流动性恶化或市场情绪极度恐慌。
+- hold: 消息面多空交织/方向不明，或技术面处于无趋势震荡。
+
+【决策权重指引】
+当你发现新闻面与技术面发生冲突时，请遵循以下原则：
+1. 极端事件优先: 若出现黑天鹅事件（VIX 飙升>25、突发政策收紧、系统性风险新闻），
+   新闻情绪具有最高优先级，可一票否决技术面信号。
+2. 常态震荡市: 若新闻情绪模糊，请赋予技术指标更高权重。
+   特别是 RSI 超买超卖区、量价背离、均线排列方向。
+3. 共振加仓: 若新闻面与技术面方向一致（如利空+技术破位），
+   可提高 confidence 至 0.7 以上。
+4. 只有在两者均无明显方向信号时，才允许输出 hold。
+
+【历史决策反馈】
+如果你收到过去的决策记录，请参考这些经验教训：
+- 如果过去的 buy 决策导致了实际亏损，请反思当时的推理是否有误。
+- 如果过去的 sell 决策成功避险，请确认当前是否面临类似风险。
+- 利用这些反馈修正今天的判断，避免重复过去的错误。
+
+【严格输出格式要求】
+1. 只能且必须输出一个合法的 JSON 对象。
+2. 绝对禁止输出任何 JSON 之外的说明性文字、问候语。
+3. 绝对禁止使用 ```json 和 ``` 这样的 Markdown 标记包裹结果。
+4. JSON 必须严格按照以下顺序包含三个字段：
+   - "reason": (字符串) 简明扼要的推理过程（限50字以内，点明最核心的多空逻辑）。
+   - "confidence": (浮点数) 0.0 到 1.0 之间的数字，代表你对该决策的置信度。
+   - "signal": (字符串) 只能是 "buy", "sell", "hold" 三者之一（必须全小写）。
+
+期望的完美输出示例：
+{"reason": "T-1日放量下跌显示资金出逃，且突发行业监管收紧新闻，系统性风险加剧。", "confidence": 0.85, "signal": "sell"}
+
+时间说明：
+- T-1日：昨日收盘后的数据（价格、成交量、波动率）
+- T日：今日需要做出决策的交易日
+- 新闻：T-1日收盘后到T日开盘前披露的信息
+
+风险控制原则：
+- 宁可错过机会，不可承担过大风险
+- 下跌趋势中果断减仓
+- 重大风险事件前主动避险"""
+
+    def __init__(
+        self,
+        use_simple_format: bool = False,
+    ) -> None:
+        self.use_simple_format = use_simple_format
+
+    def build_messages(
+        self,
+        market_context: str,
+        news_text: str,
+        technical_summary: str = "",
+        price_history: str = "",
+        memory_context: str = "",
+        date: str = "",
+    ) -> list[dict[str, str]]:
+        """
+        构建增强型消息列表。
+
+        Args:
+            market_context: 市场背景（T-1日价格、VIX、北向资金等）。
+            news_text: 新闻/研报文本。
+            technical_summary: 技术指标摘要（自然语言格式）。
+            price_history: 近 N 日价格走势（Markdown 表格）。
+            memory_context: 历史决策记忆+反馈。
+            date: 日期字符串。
+
+        Returns:
+            消息列表，包含 system 和 user 消息。
+        """
+        # 构建增强型 user prompt
+        enriched_parts = []
+
+        if date and len(date) > 10:
+            date = date[:10]
+
+        if technical_summary:
+            enriched_parts.append(f"【技术指标】\n{technical_summary}")
+
+        if price_history:
+            enriched_parts.append(f"【价格走势】\n{price_history}")
+
+        if memory_context:
+            enriched_parts.append(f"【历史决策反馈】\n{memory_context}")
+
+        if market_context:
+            enriched_parts.append(f"【T-1日市场数据】\n{market_context.strip()}")
+
+        if news_text:
+            enriched_parts.append(f"【T-1日新闻事件】\n{news_text.strip()}")
+
+        enriched_parts.append("请严格按照系统设定的 JSON 格式给出今日的交易信号：")
+
+        user_prompt = "\n\n".join(enriched_parts)
+
+        return [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+
 class SentimentPromptBuilder:
     """
     情绪分析和交易决策 Prompt 构建器。

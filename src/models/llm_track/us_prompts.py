@@ -21,6 +21,123 @@ class USPromptTemplate(PromptTemplate):
     pass
 
 
+class USSmartPromptBuilder:
+    """
+    美股状态增强型 Smart Prompt 构建器。
+
+    在 USMarketPromptBuilder 的基础上，增加技术指标、价格序列、历史决策记忆的注入，
+    与 SmartPromptBuilder 的 A 股版本对称。
+    """
+
+    SYSTEM_PROMPT = """You are a top-tier quantitative trading strategist for US equity markets. Your core task is: based on yesterday's (T-1) price/volume data, technical indicators, and news, make a trading decision for today (T) through deep semantic reasoning.
+
+【Signal Definitions】
+- "buy": Open or maintain a LONG position.
+  • Trigger: Technicals show upward momentum + News has material positive impact.
+
+- "neutral": CLOSE existing long positions and hold CASH (Defense).
+  • Trigger: Taking profits, macro uncertainty, mixed earnings guidance, or elevated VIX.
+  • Philosophy: When in doubt, staying in cash ("neutral") is the ultimate defense.
+
+- "short": Open an ACTIVE SHORT position (Extreme Bearish Bet).
+  • Trigger: Use EXTREMELY RARELY. Only when systemic crash is confirmed, verified technical breakdown on high volume, or severe macro liquidity drains.
+
+【Decision Hierarchy - Conflict Resolution】
+When news and technicals conflict:
+1. Extreme Events First: If black swan detected (VIX > 25, sudden Fed policy shift, systemic risk news),
+   news sentiment has highest priority — can override technical signals.
+2. Normal Market: If news is ambiguous, give higher weight to technical indicators
+   (RSI overbought/oversold, volume-price divergence, MA alignment).
+3. Confluence: If both news and technicals align (e.g., bearish news + technical breakdown),
+   confidence should be raised to 0.7+.
+4. Only output "neutral" when neither side shows clear directional signal.
+
+【Historical Decision Feedback】
+If you receive past decision records, learn from them:
+- If a previous "buy" resulted in actual loss, reflect on whether the reasoning was flawed.
+- If a previous "neutral" successfully avoided a drawdown, check if current conditions are similar.
+- Use this feedback to refine today's judgment and avoid repeating past mistakes.
+
+【US Market Specific Factors】
+Give extra weight to: Fed policy (rate/FOMC), VIX levels, Mega-cap Tech earnings guidance,
+geopolitical risk premiums, macro data surprises (Nonfarm/CPI/GDP).
+
+【Strict Output Format Requirements】
+1. Must output ONLY one valid JSON object.
+2. ABSOLUTELY NO explanatory text or Markdown code blocks (```json).
+3. JSON must contain exactly three fields in this order:
+   - "reason": (string) Concise reasoning (limit 50 words, highlight core logic).
+   - "confidence": (float) Number between 0.0 and 1.0.
+   - "signal": (string) Must be exactly one of "buy", "neutral", "short" (all lowercase).
+
+Expected output examples:
+{"reason": "Fed signals dovish pivot, earnings beat expectations. Strong bullish setup.", "confidence": 0.85, "signal": "buy"}
+{"reason": "Mixed signals: earnings beat but guidance weak. VIX rising. Liquidating to cash to wait for clarity.", "confidence": 0.60, "signal": "neutral"}
+{"reason": "Systemic risk triggered: CPI significantly above consensus, severe technical breakdown.", "confidence": 0.90, "signal": "short"}
+
+Time explanation:
+- T-1: Yesterday's post-market data (price, volume, volatility)
+- T: Today's trading decision date"""
+
+    def __init__(
+        self,
+        use_simple_format: bool = False,
+    ) -> None:
+        self.use_simple_format = use_simple_format
+
+    def build_messages(
+        self,
+        market_context: str,
+        news_text: str,
+        technical_summary: str = "",
+        price_history: str = "",
+        memory_context: str = "",
+        date: str = "",
+    ) -> list[dict[str, str]]:
+        """
+        Build enriched message list for US market.
+
+        Args:
+            market_context: US market context (VIX, Fed signals, etc.).
+            news_text: US-specific news (Fed, earnings, geopolitics).
+            technical_summary: Technical indicator summary (natural language).
+            price_history: Recent N-day price走势 (Markdown table).
+            memory_context: Historical decision feedback.
+            date: Date string.
+
+        Returns:
+            Message list with system and user messages.
+        """
+        enriched_parts = []
+
+        if date and len(date) > 10:
+            date = date[:10]
+
+        if technical_summary:
+            enriched_parts.append(f"【Technical Indicators】\n{technical_summary}")
+
+        if price_history:
+            enriched_parts.append(f"【Price History】\n{price_history}")
+
+        if memory_context:
+            enriched_parts.append(f"【Historical Decision Feedback】\n{memory_context}")
+
+        if market_context:
+            enriched_parts.append(f"【T-1 Market Data】\n{market_context.strip()}")
+
+        if news_text:
+            enriched_parts.append(f"【T-1 News Events】\n{news_text.strip()}")
+
+        enriched_parts.append("Please strictly follow the JSON format specified in the system prompt to provide today's trading signal:")
+
+        user_prompt = "\n\n".join(enriched_parts)
+
+        return [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+
+
 class USMarketPromptBuilder:
     """
     美股市场情绪分析和交易决策 Prompt 构建器。

@@ -1359,11 +1359,12 @@ def evaluate_advanced(
 @click.option("--start", default="2026-01-09", help="开始日期")
 @click.option("--end", default="2026-02-28", help="结束日期")
 @click.option("--news-file", default="data/raw/real_csi300_news_3m.csv", help="新闻数据文件路径")
-@click.option("--output-dir", default="docs/cache/llm_responses", help="缓存输出目录")
+@click.option("--output-dir", default="data/llm_cache", help="缓存输出目录（默认 data/llm_cache）")
 @click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "dashscope", "mock"]), help="LLM 执行器类型")
 @click.option("--model", default=None, help="LLM 模型名称（可选）")
 @click.option("--api-key", default=None, help="API Key（可选，如未提供则从环境变量读取）")
 @click.option("--reasoning", is_flag=True, help="开启推理模式（如支持）")
+@click.option("--temperature", default=0.1, type=float, help="LLM temperature，默认 0.1（低随机性，确保可复现）")
 @click.pass_context
 def cache_build(
     ctx: click.Context,
@@ -1376,6 +1377,7 @@ def cache_build(
     model: Optional[str],
     api_key: Optional[str],
     reasoning: bool,
+    temperature: float,
 ) -> None:
     """
     构建 LLM 响应离线缓存（支持断点续传）。
@@ -1726,16 +1728,19 @@ def cache_build(
         cache_file = output_path / f"llm_cache_{symbol}_{model_tag}.jsonl"
         logger.info(f"缓存文件: {cache_file}")
 
-        # 初始化 LLM Agent（传递 reasoning 和 api_key 参数）
+        # 初始化 LLM Agent（传递 reasoning、api_key 和 temperature 参数）
         llm_agent = LLMTradingAgent(
             executor_type=executor,
             model=model,
             api_key=api_key,
-            reasoning=reasoning
+            reasoning=reasoning,
+            temperature=temperature,
         )
 
         if reasoning:
             logger.info("✓ 推理模式已启用")
+        if temperature != 0.1:
+            logger.info(f"Temperature: {temperature}")
 
         # 检查已有缓存（断点续传）
         if cache_file.exists():
@@ -1776,6 +1781,233 @@ def cache_build(
 
     except Exception as e:
         logger.error(f"缓存构建失败: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        raise
+
+
+# ============================================================================
+# run_llm_agent_backtest 子命令 - 状态增强型智能体回测
+# ============================================================================
+@cli.command("run_llm_agent_backtest")
+@click.option("--symbol", "-s", default="CSI300", help="交易标的")
+@click.option("--start", default="2020-01-02", help="开始日期")
+@click.option("--end", default="2024-12-31", help="结束日期")
+@click.option("--news-file", default="data/raw/real_csi300_news_3m.csv", help="新闻数据文件路径")
+@click.option("--output-dir", default="data/llm_cache", help="缓存输出目录（默认 data/llm_cache）")
+@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "dashscope", "mock"]), help="LLM 执行器类型")
+@click.option("--model", default=None, help="LLM 模型名称（可选）")
+@click.option("--api-key", default=None, help="API Key（可选）")
+@click.option("--temperature", default=0.1, type=float, help="LLM temperature，默认 0.1")
+@click.pass_context
+def run_llm_agent_backtest(
+    ctx: click.Context,
+    symbol: str,
+    start: str,
+    end: str,
+    news_file: str,
+    output_dir: str,
+    executor: str,
+    model: Optional[str],
+    api_key: Optional[str],
+    temperature: float,
+) -> None:
+    """
+    运行状态增强型智能体回测（SmartPromptAgent）。
+
+    与 cache-build 的区别:
+    - 注入技术指标（RSI/MACD/布林带/均线/量价）
+    - 注入近 5 日价格走势
+    - 注入历史决策记忆+反馈（闭环真实收益）
+    - 强制串行执行，严格按时间顺序
+
+    用法:
+        python main.py run_llm_agent_backtest --symbol CSI300 --executor siliconflow
+    """
+    verbose = ctx.obj.get("verbose", False)
+
+    click.echo("=" * 70)
+    click.echo("  SmartPrompt Agent 回测")
+    click.echo("=" * 70)
+    click.echo(f"标的: {symbol}")
+    click.echo(f"日期范围: {start} ~ {end}")
+    click.echo(f"执行器: {executor}")
+    click.echo(f"Temperature: {temperature}")
+    click.echo("=" * 70)
+
+    try:
+        from src.models.llm_track.agent import SmartPromptAgent
+        from src.data.data_aligner import DataAligner
+
+        # 加载 OHLCV 数据
+        start_dt = pd.to_datetime(start)
+        end_dt = pd.to_datetime(end)
+
+        real_data_path = Path(f"data/raw/real_{symbol.lower()}_5y.csv")
+        if not real_data_path.exists():
+            real_data_path = Path(f"data/raw/real_{symbol.lower()}_1y.csv")
+
+        if real_data_path.exists():
+            click.echo(f"使用 OHLCV 数据: {real_data_path}")
+            ohlcv_data = pd.read_csv(real_data_path, parse_dates=["date"])
+            ohlcv_data.set_index("date", inplace=True)
+            ohlcv_data = ohlcv_data[
+                (ohlcv_data.index >= start_dt) & (ohlcv_data.index <= end_dt)
+            ]
+            click.echo(f"OHLCV: {len(ohlcv_data)} 条")
+        else:
+            click.echo(f"未找到 OHLCV 数据文件，无法运行 Agent 回测")
+            return
+
+        # 加载新闻数据
+        news_path = Path(news_file)
+        if news_path.exists():
+            df_sample = pd.read_csv(news_path, nrows=1)
+            if "timestamp" in df_sample.columns:
+                news_data = pd.read_csv(news_path, parse_dates=["timestamp"])
+            elif "date" in df_sample.columns:
+                news_data = pd.read_csv(news_path, parse_dates=["date"])
+                news_data.rename(columns={"date": "timestamp"}, inplace=True)
+            else:
+                click.echo("新闻文件缺少 timestamp 或 date 列")
+                return
+
+            news_data = news_data[
+                (news_data["timestamp"] >= start_dt) & (news_data["timestamp"] <= end_dt)
+            ]
+            click.echo(f"新闻: {len(news_data)} 条")
+        else:
+            click.echo(f"未找到新闻文件: {news_file}")
+            return
+
+        # 数据聚合
+        from src.config.market_config import MarketConfig, MarketType
+        market_type_enum = MarketConfig.get_market_type_for_symbol(symbol)
+        market_type_str = "US_MARKET" if market_type_enum == MarketType.US_MARKET else "A_SHARE"
+
+        daily_news = DataAligner.aggregate_daily_news(
+            news_data,
+            max_news_per_day=20,
+            max_content_length=150,
+            source_col="source" if "source" in news_data.columns else None,
+            filter_notices=True,
+            market_type=market_type_str,
+        )
+        click.echo(f"聚合后: {len(daily_news)} 天")
+
+        # 构建增强新闻记录（复用 cache-build 的逻辑）
+        is_us = market_type_enum == MarketType.US_MARKET
+
+        # 加载 VIX（美股）
+        vix_data = None
+        if is_us:
+            vix_path = Path("data/raw/vix_2015_2024.csv")
+            if vix_path.exists():
+                vix_data = pd.read_csv(vix_path, parse_dates=["Date"])
+                vix_data.set_index("Date", inplace=True)
+
+        # 构建 market_context（简化版，与 cache-build 相同逻辑）
+        ohlcv_dict = {idx: row for idx, row in ohlcv_data.iterrows()}
+        enhanced_news_list = []
+
+        for news_record in daily_news.to_dict("records"):
+            news_date = pd.to_datetime(news_record["timestamp"])
+            trading_day_T = pd.to_datetime(news_record.get("trading_day", news_record["timestamp"]))
+
+            # 查找 T-1 日 OHLCV
+            t_minus_1 = None
+            if news_date in ohlcv_dict:
+                t_minus_1 = news_date
+            else:
+                for days_back in range(1, 16):
+                    candidate = news_date - pd.Timedelta(days=days_back)
+                    if candidate in ohlcv_dict:
+                        t_minus_1 = candidate
+                        break
+
+            if t_minus_1 is None:
+                continue
+
+            ohlcv_row = ohlcv_dict[t_minus_1]
+            market_context = (
+                f"T-1日({t_minus_1.date()}): "
+                f"收盘价 {ohlcv_row['close']:.2f} "
+                f"(涨跌幅: {(ohlcv_row['close'] - ohlcv_row['open']) / ohlcv_row['open'] * 100:.2f}%), "
+                f"波动率: {(ohlcv_row['high'] - ohlcv_row['low']) / ohlcv_row['close'] * 100:.2f}%, "
+                f"成交量: {ohlcv_row['volume']:,.0f}"
+            )
+
+            # VIX（美股）
+            if is_us and vix_data is not None:
+                vix_date = t_minus_1.normalize()
+                for days_back in range(0, 16):
+                    check_date = vix_date - pd.Timedelta(days=days_back)
+                    if check_date in vix_data.index:
+                        vix_close = vix_data.loc[check_date, "Close"]
+                        if isinstance(vix_close, (int, float)):
+                            vix_status = "低波动" if vix_close < 20 else ("正常" if vix_close < 25 else "高波动")
+                            market_context += f", VIX: {vix_close:.2f} ({vix_status})"
+                        break
+
+            enhanced_record = news_record.copy()
+            enhanced_record["market_context"] = market_context
+            enhanced_record["timestamp"] = trading_day_T
+            enhanced_news_list.append(enhanced_record)
+
+        click.echo(f"有效决策点: {len(enhanced_news_list)} 天")
+
+        # 确定模型
+        if model is None:
+            if executor == "siliconflow":
+                model = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+            elif executor == "deepseek":
+                model = "deepseek-reasoner"
+            elif executor == "dashscope":
+                model = "glm-5"
+            else:
+                model = "qwen2.5:7b"
+
+        click.echo(f"模型: {model}")
+
+        # 创建 SmartPromptAgent
+        agent = SmartPromptAgent(
+            executor_type=executor,
+            model=model,
+            api_key=api_key,
+            temperature=temperature,
+            ohlcv_df=ohlcv_data,
+            use_enrichment=True,
+        )
+
+        # 缓存路径
+        cache_file = Path(output_dir) / f"llm_cache_{symbol}_{executor}_agent.jsonl"
+        click.echo(f"缓存: {cache_file}")
+
+        # 加载已有缓存（断点续传）
+        if cache_file.exists():
+            agent._load_cache(cache_file)
+            click.echo(f"已加载 {len(agent._cache)} 条缓存")
+
+        # 运行批量分析
+        import time
+        start_time = time.time()
+        signals = agent.batch_analyze(
+            news_list=enhanced_news_list,
+            market_context="",
+            symbol=symbol,
+            cache_path=cache_file,
+        )
+        elapsed = time.time() - start_time
+
+        click.echo(f"\nAgent 回测完成:")
+        click.echo(f"  总耗时: {elapsed:.2f} 秒")
+        click.echo(f"  信号数: {len(signals)}")
+        if len(signals) > 0:
+            click.echo(f"  平均延迟: {signals['latency_ms'].mean():.1f}ms")
+
+    except Exception as e:
+        click.echo(f"Agent 回测失败: {e}")
         if verbose:
             import traceback
             traceback.print_exc()

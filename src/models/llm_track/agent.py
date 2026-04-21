@@ -524,6 +524,9 @@ class CacheEntry:
     model: str
     raw_response: str = ""  # 保存原始API响应，用于调试
     cache_time: str = field(default_factory=lambda: datetime.now().isoformat())
+    # Agent 扩展字段（可选）
+    enriched_summary: str = ""  # Smart Prompt 注入的技术指标摘要
+    agent_mode: bool = False    # 是否为 Agent 模式
 
     def to_jsonl(self) -> str:
         """转换为 JSONL 格式字符串。"""
@@ -543,6 +546,8 @@ class CacheEntry:
             "model": self.model,
             "raw_response": self.raw_response,
             "cache_time": self.cache_time,
+            "enriched_summary": self.enriched_summary,
+            "agent_mode": self.agent_mode,
         }
 
 
@@ -574,7 +579,7 @@ class LLMTradingAgent:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         timeout: int = 60,
-        temperature: float = 0.7,
+        temperature: float = 0.1,
         use_cache: bool = True,
         cache_dir: Optional[Path] = None,
         reasoning: bool = False,
@@ -602,8 +607,8 @@ class LLMTradingAgent:
         self.prompt_builder_a_share = SentimentPromptBuilder(use_simple_format=True)
         self.prompt_builder_us = USMarketPromptBuilder(use_simple_format=True)
 
-        # 设置缓存目录
-        project_root = Path(__file__).parent.parent.parent
+        # 设置缓存目录（项目根目录）
+        project_root = Path(__file__).parent.parent.parent.parent
         self.cache_dir = cache_dir or project_root / "data" / "llm_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1118,6 +1123,322 @@ class LLMTradingAgent:
         ]
         df = df[[col for col in standard_columns if col in df.columns]]
 
+        return df
+
+
+# ============================================================================
+# Smart Prompt Agent - 状态增强型智能体 (一次调用)
+# ============================================================================
+
+class SmartPromptAgent(LLMTradingAgent):
+    """
+    状态增强型 LLM 交易智能体。
+
+    继承 LLMTradingAgent，在单次 LLM 调用中注入：
+    - 技术指标摘要（Python 预计算，自然语言格式）
+    - 近 N 日价格走势（Markdown 表格）
+    - 历史决策记忆+反馈（闭环真实收益）
+
+    每次调用仍为 1 次 LLM 请求，无工具循环，无反思调用。
+    batch_analyze() 强制串行执行，严格按时间顺序处理。
+    """
+
+    def __init__(
+        self,
+        executor_type: str = "ollama",
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        timeout: int = 60,
+        temperature: float = 0.1,
+        use_cache: bool = True,
+        cache_dir: Optional[Path] = None,
+        reasoning: bool = False,
+        # Agent 特有参数
+        ohlcv_df: Optional[pd.DataFrame] = None,
+        use_enrichment: bool = True,
+    ) -> None:
+        """
+        初始化 Smart Prompt Agent。
+
+        Args:
+            ohlcv_df: OHLCV 数据，用于计算技术指标和价格历史。
+            use_enrichment: 是否启用增强注入（False 时行为与父类相同）。
+            其余参数与父类相同。
+        """
+        super().__init__(
+            executor_type=executor_type,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+            temperature=temperature,
+            use_cache=use_cache,
+            cache_dir=cache_dir,
+            reasoning=reasoning,
+        )
+
+        self.ohlcv_df = ohlcv_df
+        self.use_enrichment = use_enrichment
+
+        # 记忆存储
+        from .memory import DecisionMemoryStore
+        self.memory_store = DecisionMemoryStore(max_history=20)
+
+        # Agent 专用 Prompt 构建器（延迟导入避免循环依赖）
+        self._smart_builder_a_share = None
+        self._smart_builder_us = None
+
+    def _get_smart_builder(self, symbol: str):
+        """获取 Smart Prompt 构建器。"""
+        from src.config.market_config import MarketConfig, MarketType
+
+        if self._smart_builder_a_share is None:
+            from .prompts import SmartPromptBuilder
+            self._smart_builder_a_share = SmartPromptBuilder()
+
+        if self._smart_builder_us is None:
+            from .us_prompts import USSmartPromptBuilder
+            self._smart_builder_us = USSmartPromptBuilder()
+
+        market_type = MarketConfig.get_market_type_for_symbol(symbol)
+        if market_type == MarketType.US_MARKET:
+            return self._smart_builder_us
+        return self._smart_builder_a_share
+
+    def analyze(
+        self,
+        news_text: str,
+        market_context: str = "当前市场正常运行。",
+        symbol: str = "UNKNOWN",
+        timestamp: Optional[datetime] = None,
+    ) -> LLMResponse:
+        """
+        分析单条新闻，生成交易信号（增强版）。
+
+        流程:
+        1. 缓存检查
+        2. 冷启动处理（memory 为空时跳过记忆注入）
+        3. MarketEnricher 预计算技术指标+价格历史+记忆
+        4. SmartPromptBuilder 构建增强消息
+        5. 调用 executor（1 次）
+        6. 解析响应
+        7. 更新缓存 + 添加 DecisionRecord 到 memory_store
+
+        Args:
+            news_text: 新闻文本。
+            market_context: 市场背景。
+            symbol: 资产代码。
+            timestamp: 时间戳。
+
+        Returns:
+            LLMResponse 对象。
+        """
+        if not self.use_enrichment or self.ohlcv_df is None:
+            # 无增强模式，回退到父类行为
+            return super().analyze(
+                news_text=news_text,
+                market_context=market_context,
+                symbol=symbol,
+                timestamp=timestamp,
+            )
+
+        # ========== 缓存检查 ==========
+        if timestamp is not None:
+            ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+            cache_key = f"{symbol}_{ts_str}"
+        else:
+            cache_key = f"{symbol}_{hash(news_text)}"
+
+        if self.use_cache and cache_key in self._cache:
+            cached = self._cache[cache_key]
+            return LLMResponse(
+                signal=cached.signal,
+                confidence=cached.confidence,
+                reasoning=cached.reasoning,
+                latency_ms=0,
+                raw_response="[CACHE HIT]",
+                parse_success=True,
+                timestamp=timestamp,
+                symbol=symbol,
+                model=cached.model,
+            )
+
+        # ========== 数据增强 ==========
+        ts_str = ts_str if timestamp is not None else ""
+        current_date = ts_str[:10] if len(ts_str) >= 10 else str(timestamp) if timestamp else ""
+
+        enriched_context = ""
+        technical_summary = ""
+        price_history = ""
+        memory_context = ""
+
+        if current_date:
+            try:
+                from .enricher import MarketEnricher
+                enricher = MarketEnricher(self.ohlcv_df, current_date=current_date)
+
+                # 冷启动处理：memory 为空时 get_memory_context 返回空字符串
+                memory_context = enricher.get_memory_context(self.memory_store)
+
+                # 技术指标和价格历史始终注入（除非数据不足）
+                technical_summary = enricher.get_technical_indicators()
+                price_history = enricher.get_price_history(window=5)
+
+                enriched_context = enricher.get_enriched_context(
+                    memory_store=self.memory_store,
+                    price_window=5,
+                    memory_n=5,
+                )
+            except Exception as e:
+                logger.warning(f"数据增强失败 ({current_date}): {e}，回退到基础模式")
+
+        # ========== 构建增强消息 ==========
+        builder = self._get_smart_builder(symbol)
+        messages = builder.build_messages(
+            market_context=market_context,
+            news_text=news_text,
+            technical_summary=technical_summary,
+            price_history=price_history,
+            memory_context=memory_context,
+            date=ts_str,
+        )
+
+        # ========== 执行推理 ==========
+        response = self.executor.execute(messages, reasoning=self.reasoning)
+        response.timestamp = timestamp
+        response.symbol = symbol
+
+        # ========== 更新缓存 ==========
+        if self.use_cache:
+            self._cache[cache_key] = CacheEntry(
+                timestamp=ts_str,
+                symbol=symbol,
+                news_text=news_text,
+                market_context=market_context,
+                signal=response.signal,
+                confidence=response.confidence,
+                reasoning=response.reasoning,
+                latency_ms=response.latency_ms,
+                model=response.model,
+                enriched_summary=enriched_context[:500] if enriched_context else "",
+                agent_mode=True,
+            )
+
+        # ========== 添加决策记录到记忆 ==========
+        from .memory import DecisionRecord
+        record = DecisionRecord(
+            date=current_date,
+            symbol=symbol,
+            signal=response.signal,
+            confidence=response.confidence,
+            reasoning=response.reasoning,
+        )
+        self.memory_store.add_record(record)
+
+        return response
+
+    def batch_analyze(
+        self,
+        news_list: list[dict],
+        market_context: str = "当前市场正常运行。",
+        symbol: str = "UNKNOWN",
+        max_workers: int = 4,
+        cache_path: Optional[Path] = None,
+        use_parallel: bool = True,  # 被忽略，始终串行
+    ) -> pd.DataFrame:
+        """
+        批量分析新闻（强制串行执行）。
+
+        与父类的关键差异:
+        - 始终按时间顺序逐条处理（忽略 use_parallel 参数）
+        - 每处理完一条，DecisionRecord 立即添加到 memory_store
+        - 下一条新闻调用 analyze() 时，能读取到前一条的决策记录
+        - actual_return 由 MarketEnricher 在后续交易日自动回填
+
+        Args:
+            news_list: 新闻列表，每项包含 'timestamp' 和文本字段。
+            market_context: 市场背景。
+            symbol: 资产代码。
+            max_workers: 被忽略（为了接口兼容保留）。
+            cache_path: 缓存文件路径。
+            use_parallel: 被忽略（为了接口兼容保留）。
+
+        Returns:
+            包含交易信号的 DataFrame。
+        """
+        # 按时间戳排序
+        sorted_news = sorted(
+            news_list,
+            key=lambda x: x.get("timestamp") or x.get("decision_date") or datetime.min,
+        )
+
+        # 加载已有缓存
+        if cache_path and cache_path.exists():
+            self._load_cache(cache_path)
+
+        results: list[dict] = []
+        request_delay = 2.0
+
+        for news in tqdm(sorted_news, desc="SmartPrompt Agent Analysis", unit="news"):
+            timestamp = news.get("timestamp") or news.get("decision_date")
+            if isinstance(timestamp, str):
+                timestamp = datetime.fromisoformat(timestamp)
+
+            news_text = news.get(
+                "aggregated_content",
+                news.get("structured_summary", news.get("text", news.get("content", "")))
+            )
+
+            news_market_context = news.get("market_context", market_context)
+
+            response = self.analyze(
+                news_text=news_text,
+                market_context=news_market_context,
+                symbol=symbol,
+                timestamp=timestamp,
+            )
+
+            result = {
+                "timestamp": timestamp,
+                "symbol": symbol,
+                "llm_signal": response.signal,
+                "reasoning": response.reasoning,
+                "latency_ms": response.latency_ms,
+                "confidence": response.confidence,
+                "model": response.model,
+                "parse_success": response.parse_success,
+                "raw_response": response.raw_response,
+            }
+
+            # 实时追加保存：从 self._cache 获取完整数据（包含 enriched_summary 和 agent_mode）
+            if cache_path and result.get("latency_ms", 0) > 0:
+                ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+                cache_key = f"{symbol}_{ts_str}"
+                if cache_key in self._cache:
+                    cached_entry = self._cache[cache_key]
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    import fcntl
+                    with open(cache_path, "a", encoding="utf-8") as f:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                        try:
+                            f.write(cached_entry.to_jsonl() + "\n")
+                        finally:
+                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+            results.append(result)
+            time.sleep(request_delay)
+
+        # 保存记忆（可选）
+        if self.memory_store:
+            memory_path = self.cache_dir / f"agent_memory_{symbol}.jsonl"
+            self.memory_store.save_jsonl(memory_path)
+            logger.info(f"决策记忆已保存: {memory_path} ({len(self.memory_store)} 条)")
+
+        if cache_path and results:
+            logger.info(f"缓存已实时保存到: {cache_path}")
+
+        df = pd.DataFrame(results)
         return df
 
 

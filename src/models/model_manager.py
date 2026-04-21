@@ -300,7 +300,7 @@ class ModelManager:
         # 加载模型
         if model_type == ModelType.LSTM:
             from src.models.ml_track.baselines import LSTMModel
-            checkpoint = torch.load(model_path, map_location="cpu")
+            checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
 
             model = LSTMModel(
                 input_dim=checkpoint["config"]["input_dim"],

@@ -461,7 +461,9 @@ class LSTMModel(BaseModel):
         if len(X_seq) == 0:
             return np.full(len(X), 0.5)
 
-        X_tensor = torch.FloatTensor(X_seq).to(DEVICE)
+        X_tensor = torch.FloatTensor(X_seq)
+        if hasattr(self, 'model') and self.model is not None:
+            X_tensor = X_tensor.to(next(self.model.parameters()).device)
 
         # 预测
         self.model.eval()

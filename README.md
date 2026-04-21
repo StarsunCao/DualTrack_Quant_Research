@@ -16,6 +16,7 @@ DualTrack is a Python 3.12+ dual-track quantitative backtesting framework that s
 
 - **3 Machine Learning Models**: Logistic Regression, LSTM, LightGBM
 - **7+ Large Language Models**: DeepSeek V3.2/R1-14B/R1-8B, Qwen3.5, GLM-5, etc., with cloud and local deployment
+- **SmartPromptAgent**: State-enhanced LLM agent with technical indicators, price history, and closed-loop decision memory
 - **2 Markets**: A-Shares (CSI300) and US Stocks (QQQ/NASDAQ-100)
 - **Independent Track Backtesting**: Each model generates signals and backtests independently, no signal fusion
 - **Multi-Dimensional Evaluation**: Financial metrics (Sharpe, MaxDD, WinRate) + Engineering metrics (Latency, Cost)
@@ -72,6 +73,27 @@ DualTrack is a Python 3.12+ dual-track quantitative backtesting framework that s
 | `qwen3.5-9b` | Local (Ollama) | Pending | Qwen3.5 9B deployable |
 | `glm-5` | Cloud (SiliconFlow / DashScope) | US only | GLM-5 |
 
+### SmartPromptAgent (State-Enhanced LLM Agent)
+
+The SmartPromptAgent upgrades LLM tracks from "prompt scripting" to a modern agent paradigm while maintaining a single LLM call per trading day for cost efficiency:
+
+- **Technical Indicators**: RSI, MACD, Bollinger Bands, MA alignment, volume-price relationship — pre-computed by Python and injected as natural language summaries
+- **Price History**: Recent 5-day price trend table with volume annotations
+- **Closed-Loop Memory**: Past decisions with actual market returns auto-filled back, enabling the LLM to see whether its previous calls were right or wrong
+- **Zero Look-ahead Bias**: All injected data strictly limited to T-1 and earlier, enforced by `MarketEnricher` with assert guards
+- **Cost-Optimized**: ~300 additional tokens per day, still 1 LLM call/trading day (vs. 2-4x for multi-call agent designs)
+- **Temperature**: 0.1 (low randomness for reproducible backtests)
+
+```bash
+# Run SmartPromptAgent backtest
+uv run python main.py run_llm_agent_backtest \
+  --symbol CSI300 \
+  --start 2020-01-02 \
+  --end 2024-12-31 \
+  --executor siliconflow \
+  --model deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+```
+
 > **Local Deployment Device**: MacBook Air M2 (24GB RAM + 512GB SSD)
 >
 > **Qwen Note**: Due to potential political sensitivity triggers, Qwen models were not tested on the A-Shares market, only on US stocks.
@@ -121,7 +143,8 @@ uv run python main.py cache-build \
   --end 2024-12-31 \
   --news-file data/raw/csi300_news_combined_2020_2024.csv \
   --executor siliconflow \
-  --model deepseek-ai/DeepSeek-V3.2
+  --model deepseek-ai/DeepSeek-V3.2 \
+  --temperature 0.1
 ```
 
 ### Training ML Models
@@ -176,7 +199,9 @@ export OLLAMA_HOST="http://localhost:11434"
 │   │   ├── llm_track/         # LLM tracks
 │   │   │   ├── prompts.py     # A-Shares CoT prompts
 │   │   │   ├── us_prompts.py  # US market prompts
-│   │   │   └── agent.py       # Multi-model executors
+│   │   │   ├── agent.py       # Multi-model executors + SmartPromptAgent
+│   │   │   ├── memory.py      # Decision memory with closed-loop feedback
+│   │   │   └── enricher.py    # Market data enricher (indicators, prices, memory)
 │   │   └── model_manager.py
 │   ├── orchestrator/          # Signal orchestration
 │   │   ├── fusion_engine.py   # Signal fusion engine
@@ -293,6 +318,7 @@ docker run --rm dualtrack-quant python main.py run --track all --compare --symbo
 | Phase 6: Evaluation | ✅ Done | Multi-dimensional metrics, visualization |
 | Phase 7: CLI & Docker | ✅ Done | Multi-track CLI, containerization |
 | Phase 8: Advanced Evaluation | ✅ Done | MAE/MFE, market state segmentation, SHAP attribution |
+| Phase 9: Agent Architecture | ✅ Done | SmartPromptAgent: indicators, price history, closed-loop memory, zero look-ahead |
 
 ---
 
