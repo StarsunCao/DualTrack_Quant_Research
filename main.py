@@ -798,9 +798,10 @@ def run_backtest(
     is_us_market = (market_type_enum == MarketType.US_MARKET)
     click.echo(f"  市场类型: {'美股' if is_us_market else 'A股'}")
 
-    # 默认禁止做空（即使美股也默认减仓而非做空）
-    # 原因：LLM的sell信号更适合作为"防御性减仓"而非"主动性做空"
-    allow_short = False
+    # 根据市场配置决定是否允许做空
+    market_config = MarketConfig.get_config_for_symbol(symbol)
+    allow_short = market_config.allow_short_selling
+    click.echo(f"  允许做空: {allow_short}")
 
     track_results = {}
 
@@ -1360,7 +1361,7 @@ def evaluate_advanced(
 @click.option("--end", default="2026-02-28", help="结束日期")
 @click.option("--news-file", default="data/raw/real_csi300_news_3m.csv", help="新闻数据文件路径")
 @click.option("--output-dir", default="data/llm_cache", help="缓存输出目录（默认 data/llm_cache）")
-@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "dashscope", "mock"]), help="LLM 执行器类型")
+@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "deepseek_v4", "siliconflow", "dashscope", "nvidia", "mock"]), help="LLM 执行器类型")
 @click.option("--model", default=None, help="LLM 模型名称（可选）")
 @click.option("--api-key", default=None, help="API Key（可选，如未提供则从环境变量读取）")
 @click.option("--reasoning", is_flag=True, help="开启推理模式（如支持）")
@@ -1495,10 +1496,17 @@ def cache_build(
         logger.info("数据聚合: 将多源新闻聚合为每日决策...")
         logger.info(f"市场类型: {market_type}")
 
+        # 根据市场类型调整聚合参数
+        if market_type == "US_MARKET":
+            # 美股：仅保留标题（无内容截断），48 条 × 62 字符 ≈ 3000 字符/天
+            max_news = 48
+        else:
+            # A股：title + content 混合，20 条 × 150 字符 ≈ 3000 字符/天
+            max_news = 20
+
         daily_news = DataAligner.aggregate_daily_news(
             news_data,
-            max_news_per_day=20,
-            max_content_length=150,
+            max_news_per_day=max_news,
             source_col="source" if "source" in news_data.columns else None,
             filter_notices=True,  # 智能筛选重要公告
             market_type=market_type  # 传递市场类型
@@ -1605,6 +1613,14 @@ def cache_build(
             # 获取T-1的OHLCV数据（昨日收盘数据）
             t_minus_1_ohlcv = ohlcv_dict[t_minus_1]
 
+            # 查找 T-2 收盘价，用于计算 T-1 日的市场涨跌幅（昨收→今收）
+            t_minus_2_close = None
+            t_minus_1_idx = ohlcv_data.index.get_loc(t_minus_1)
+            if t_minus_1_idx > 0:
+                t_minus_2 = ohlcv_data.index[t_minus_1_idx - 1]
+                t_minus_2_close = ohlcv_data.loc[t_minus_2, "close"]
+            change_pct = (t_minus_1_ohlcv['close'] - t_minus_2_close) / t_minus_2_close * 100 if t_minus_2_close is not None else 0.0
+
             # 【优化】使用预构建的北向资金字典（O(1)查找）
             northbound_info = ""
             if northbound_dict:
@@ -1697,6 +1713,8 @@ def cache_build(
                 model = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
             elif executor == "deepseek":
                 model = "deepseek-reasoner"  # 使用推理模型
+            elif executor == "deepseek_v4":
+                model = "deepseek-v4-flash"
             elif executor == "dashscope":
                 model = "glm-5"  # 阿里云 DashScope GLM-5
             else:
@@ -1720,6 +1738,8 @@ def cache_build(
             model_tag = "qwen35_9b"
         elif "GLM-5" in model or "glm-5" in model.lower():
             model_tag = "glm5"
+        elif "deepseek-v4" in model.lower() or executor == "deepseek_v4":
+            model_tag = "deepseek_v4_flash"
         elif "deepseek-reasoner" in model or model == "deepseek-chat":
             model_tag = "deepseek_official"
         else:
@@ -1796,7 +1816,7 @@ def cache_build(
 @click.option("--end", default="2024-12-31", help="结束日期")
 @click.option("--news-file", default="data/raw/real_csi300_news_3m.csv", help="新闻数据文件路径")
 @click.option("--output-dir", default="data/llm_cache", help="缓存输出目录（默认 data/llm_cache）")
-@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "siliconflow", "dashscope", "mock"]), help="LLM 执行器类型")
+@click.option("--executor", default="ollama", type=click.Choice(["ollama", "deepseek", "deepseek_v4", "siliconflow", "dashscope", "nvidia", "mock"]), help="LLM 执行器类型")
 @click.option("--model", default=None, help="LLM 模型名称（可选）")
 @click.option("--api-key", default=None, help="API Key（可选）")
 @click.option("--temperature", default=0.1, type=float, help="LLM temperature，默认 0.1")
@@ -1852,10 +1872,7 @@ def run_llm_agent_backtest(
             click.echo(f"使用 OHLCV 数据: {real_data_path}")
             ohlcv_data = pd.read_csv(real_data_path, parse_dates=["date"])
             ohlcv_data.set_index("date", inplace=True)
-            ohlcv_data = ohlcv_data[
-                (ohlcv_data.index >= start_dt) & (ohlcv_data.index <= end_dt)
-            ]
-            click.echo(f"OHLCV: {len(ohlcv_data)} 条")
+            click.echo(f"OHLCV: {len(ohlcv_data)} 条（完整数据，供 MarketEnricher 截取历史）")
         else:
             click.echo(f"未找到 OHLCV 数据文件，无法运行 Agent 回测")
             return
@@ -1886,17 +1903,31 @@ def run_llm_agent_backtest(
         market_type_enum = MarketConfig.get_market_type_for_symbol(symbol)
         market_type_str = "US_MARKET" if market_type_enum == MarketType.US_MARKET else "A_SHARE"
 
+        # 根据市场类型调整聚合参数
+        if market_type_str == "US_MARKET":
+            # 美股：仅保留标题（无内容截断），48 条 × 62 字符 ≈ 3000 字符/天
+            max_news = 48
+        else:
+            # A股：title + content 混合，20 条 × 150 字符 ≈ 3000 字符/天
+            max_news = 20
+
         daily_news = DataAligner.aggregate_daily_news(
             news_data,
-            max_news_per_day=20,
-            max_content_length=150,
+            max_news_per_day=max_news,
             source_col="source" if "source" in news_data.columns else None,
             filter_notices=True,
             market_type=market_type_str,
         )
         click.echo(f"聚合后: {len(daily_news)} 天")
 
-        # 构建增强新闻记录（复用 cache-build 的逻辑）
+        # 交易日过滤：合并周末和假期新闻到下一交易日
+        daily_news = DataAligner.merge_non_trading_news_to_trading_days(
+            daily_news,
+            trading_days=ohlcv_data.index.normalize(),
+        )
+        click.echo(f"交易日过滤+合并后: {len(daily_news)} 天")
+
+        # 构建增强新闻记录（完整 market_context 注入，含北向资金 + 宏观数据 + VIX）
         is_us = market_type_enum == MarketType.US_MARKET
 
         # 加载 VIX（美股）
@@ -1907,7 +1938,46 @@ def run_llm_agent_backtest(
                 vix_data = pd.read_csv(vix_path, parse_dates=["Date"])
                 vix_data.set_index("Date", inplace=True)
 
-        # 构建 market_context（简化版，与 cache-build 相同逻辑）
+        # 加载北向资金数据（A股）
+        northbound_data = None
+        northbound_dict = {}
+        if not is_us:
+            northbound_path = Path("data/raw/northbound_flow_2020_2024.csv")
+            if northbound_path.exists():
+                northbound_data = pd.read_csv(northbound_path, parse_dates=["timestamp"])
+                northbound_data.set_index("timestamp", inplace=True)
+                # 预构建 O(1) 查找字典
+                for idx in northbound_data.index:
+                    northbound_dict[idx] = northbound_data.loc[idx].to_dict()
+                click.echo(f"✓ 北向资金数据: {len(northbound_dict)} 条")
+
+        # 加载宏观数据（A股，从新闻文件中提取 source == "macro" 的记录）
+        macro_data = None
+        macro_latest_cache = {}  # {date: {title: {publish_date, content}}}
+        if not is_us and "source" in news_data.columns:
+            macro_data = news_data[news_data["source"] == "macro"].copy()
+            if not macro_data.empty:
+                macro_data.set_index("timestamp", inplace=True)
+                macro_data.sort_index(inplace=True)
+                # 预计算每日最新值，避免循环中重复 groupby
+                all_dates = sorted(macro_data.index.unique())
+                for date in all_dates:
+                    available = macro_data[macro_data.index <= date]
+                    latest_by_title = {}
+                    for title in available['title'].unique():
+                        title_data = available[available['title'] == title]
+                        if not title_data.empty:
+                            latest_row = title_data.iloc[-1]
+                            publish_date = title_data.index[-1]
+                            content_short = str(latest_row.get('content', ''))[:50] + ("..." if len(str(latest_row.get('content', ''))) > 50 else "")
+                            latest_by_title[title] = {
+                                'publish_date': publish_date,
+                                'content': content_short
+                            }
+                    macro_latest_cache[date] = latest_by_title
+                click.echo(f"✓ 宏观数据: {len(macro_data)} 条，{len(macro_latest_cache)} 个日期")
+
+        # OHLCV 字典（O(1) 查找）
         ohlcv_dict = {idx: row for idx, row in ohlcv_data.iterrows()}
         enhanced_news_list = []
 
@@ -1930,13 +2000,56 @@ def run_llm_agent_backtest(
                 continue
 
             ohlcv_row = ohlcv_dict[t_minus_1]
+
+            # === 构建 market_context ===
+            # 查找 T-2 收盘价，用于计算 T-1 日的市场涨跌幅（昨收→今收）
+            t_minus_2_close = None
+            t_minus_1_idx = ohlcv_data.index.get_loc(t_minus_1)
+            if t_minus_1_idx > 0:
+                t_minus_2 = ohlcv_data.index[t_minus_1_idx - 1]
+                t_minus_2_close = ohlcv_data.loc[t_minus_2, "close"]
+
+            if t_minus_2_close is not None:
+                change_pct = (ohlcv_row['close'] - t_minus_2_close) / t_minus_2_close * 100
+            else:
+                change_pct = 0.0
+
             market_context = (
                 f"T-1日({t_minus_1.date()}): "
                 f"收盘价 {ohlcv_row['close']:.2f} "
-                f"(涨跌幅: {(ohlcv_row['close'] - ohlcv_row['open']) / ohlcv_row['open'] * 100:.2f}%), "
+                f"(涨跌幅: {change_pct:+.2f}%), "
                 f"波动率: {(ohlcv_row['high'] - ohlcv_row['low']) / ohlcv_row['close'] * 100:.2f}%, "
                 f"成交量: {ohlcv_row['volume']:,.0f}"
             )
+
+            # 北向资金（A股）
+            if not is_us and northbound_dict:
+                nb = None
+                nb_date = None
+                for days_back in range(0, 16):
+                    check_date = t_minus_1 - pd.Timedelta(days=days_back)
+                    if check_date in northbound_dict:
+                        nb = northbound_dict[check_date]
+                        nb_date = check_date
+                        break
+                if nb is not None:
+                    flow_value = nb.get('net_flow', None)
+                    if flow_value is not None and pd.notna(flow_value) and isinstance(flow_value, (int, float)):
+                        date_note = f"({nb_date.date()})" if nb_date != t_minus_1 else ""
+                        market_context += f"\n- 北向资金{date_note}: 净流入 {flow_value:.2f} 亿元"
+
+            # 宏观数据（A股）
+            if not is_us and macro_latest_cache:
+                available_dates = [d for d in macro_latest_cache.keys() if d <= t_minus_1]
+                if available_dates:
+                    latest_date = max(available_dates)
+                    latest_macros_dict = macro_latest_cache[latest_date]
+                    latest_macros = []
+                    for title, info in latest_macros_dict.items():
+                        date_note = f"({info['publish_date'].date()})"
+                        latest_macros.append(f"- {title}{date_note}: {info['content']}")
+                    if latest_macros:
+                        market_context += "\n- 宏观数据:\n" + "\n".join(latest_macros[:5])
 
             # VIX（美股）
             if is_us and vix_data is not None:
@@ -1947,7 +2060,7 @@ def run_llm_agent_backtest(
                         vix_close = vix_data.loc[check_date, "Close"]
                         if isinstance(vix_close, (int, float)):
                             vix_status = "低波动" if vix_close < 20 else ("正常" if vix_close < 25 else "高波动")
-                            market_context += f", VIX: {vix_close:.2f} ({vix_status})"
+                            market_context += f"\n- VIX: {vix_close:.2f} ({vix_status})"
                         break
 
             enhanced_record = news_record.copy()
@@ -1963,6 +2076,8 @@ def run_llm_agent_backtest(
                 model = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
             elif executor == "deepseek":
                 model = "deepseek-reasoner"
+            elif executor == "deepseek_v4":
+                model = "deepseek-v4-flash"
             elif executor == "dashscope":
                 model = "glm-5"
             else:
@@ -1976,12 +2091,27 @@ def run_llm_agent_backtest(
             model=model,
             api_key=api_key,
             temperature=temperature,
+            timeout=300 if executor == "nvidia" else 180,
             ohlcv_df=ohlcv_data,
             use_enrichment=True,
         )
 
-        # 缓存路径
-        cache_file = Path(output_dir) / f"llm_cache_{symbol}_{executor}_agent.jsonl"
+        # 缓存路径（包含模型名称，避免不同模型覆盖同一文件）
+        # 规范化模型名称：只保留核心模型标识，去除路径前缀
+        if model:
+            model_short = model.replace("google/", "").replace("deepseek-ai/", "").replace("/", "_")
+            # 进一步规范化：DeepSeek 系列统一命名
+            if "DeepSeek-V3.2" in model or "DeepSeek-V3" in model:
+                model_short = "deepseek-v3.2"
+            elif "DeepSeek-R1-Distill-Qwen-14B" in model:
+                model_short = "deepseek-r1-14b"
+            elif "DeepSeek-R1-0528-Qwen3-8B" in model:
+                model_short = "deepseek-r1-8b"
+            elif "deepseek-v4" in model.lower():
+                model_short = "deepseek-v4-flash"
+        else:
+            model_short = executor.replace(".", "_")
+        cache_file = Path(output_dir) / f"llm_cache_{symbol}_{model_short}_agent.jsonl"
         click.echo(f"缓存: {cache_file}")
 
         # 加载已有缓存（断点续传）

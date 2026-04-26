@@ -449,6 +449,166 @@ class DeepSeekExecutor(BaseExecutor):
             return False
 
 
+class DeepSeekV4Executor(BaseExecutor):
+    """
+    DeepSeek V4 官方 API 执行器。
+
+    使用 DeepSeek 官方 API (https://api.deepseek.com)，
+    支持 JSON Output 功能 (response_format=json_object)。
+    """
+
+    def __init__(
+        self,
+        model: str = "deepseek-v4-flash",
+        api_key: Optional[str] = None,
+        base_url: str = "https://api.deepseek.com",
+        timeout: int = 60,
+        temperature: float = 0.7,
+    ) -> None:
+        """
+        初始化 DeepSeek V4 执行器。
+
+        Args:
+            model: 模型名称，默认为 deepseek-v4-flash。
+            api_key: DeepSeek API Key，如未提供则从环境变量读取。
+            base_url: API 基础 URL。
+            timeout: 请求超时时间（秒）。
+            temperature: 生成温度。
+        """
+        super().__init__(model=model, timeout=timeout)
+        self.base_url = base_url
+        self.temperature = temperature
+
+        if api_key is None:
+            import os
+            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        self.api_key = api_key
+
+        self._client = None
+
+    @property
+    def client(self):
+        """延迟初始化 OpenAI 客户端。"""
+        if self._client is None:
+            try:
+                from openai import OpenAI
+                self._client = OpenAI(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    timeout=self.timeout,
+                )
+            except ImportError:
+                raise ImportError("请安装 openai 库: uv add openai")
+        return self._client
+
+    def execute(
+        self,
+        messages: list[dict[str, str]],
+        **kwargs,
+    ) -> LLMResponse:
+        """
+        执行 DeepSeek V4 API 请求，使用 JSON Output 模式。
+
+        Args:
+            messages: 消息列表。
+
+        Returns:
+            LLMResponse 对象。
+        """
+        start_time = time.time()
+
+        if not self.api_key:
+            return LLMResponse(
+                signal="hold",
+                confidence=0.0,
+                reasoning="未配置 DEEPSEEK_API_KEY",
+                latency_ms=0,
+                raw_response="",
+                parse_success=False,
+                model=self.model,
+            )
+
+        # 确保 prompt 中包含 "JSON" 字样以触发 JSON Output
+        for msg in messages:
+            content = msg.get("content", "")
+            if "JSON" not in content.upper() and "json" not in content.lower():
+                # 在最后一个 user message 后追加 JSON 提示
+                if msg.get("role") == "user":
+                    msg["content"] = content + "\n\nPlease respond in valid JSON format."
+                break
+
+        try:
+            api_params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": kwargs.get("temperature", self.temperature),
+                "max_tokens": kwargs.get("max_tokens", 8192),
+                "response_format": {"type": "json_object"},
+            }
+
+            response = self.client.chat.completions.create(**api_params)
+
+            latency_ms = (time.time() - start_time) * 1000
+            content = response.choices[0].message.content or ""
+
+            usage = response.usage
+            if usage:
+                completion_tokens = usage.completion_tokens
+                total_latency_s = latency_ms / 1000
+                if total_latency_s > 0 and completion_tokens > 0:
+                    tps = completion_tokens / total_latency_s
+                    eval_duration_ms = latency_ms
+                    print(f"DeepSeek V4 Inference: Latency={latency_ms/1000:.2f}s | Speed={tps:.1f} tokens/s | Tokens={completion_tokens}")
+                else:
+                    tps = 0.0
+                    eval_duration_ms = 0.0
+            else:
+                completion_tokens = 0
+                tps = 0.0
+                eval_duration_ms = 0.0
+
+            parsed = TradingDecisionParser.parse_response(content)
+
+            return LLMResponse(
+                signal=parsed["signal"],
+                confidence=parsed["confidence"],
+                reasoning=parsed["reasoning"],
+                latency_ms=latency_ms,
+                raw_response=content,
+                parse_success=parsed["parse_success"],
+                model=self.model,
+                tps=tps,
+                eval_count=completion_tokens,
+                eval_duration_ms=eval_duration_ms,
+            )
+
+        except Exception as e:
+            return LLMResponse(
+                signal="hold",
+                confidence=0.0,
+                reasoning=f"API 错误: {str(e)}",
+                latency_ms=(time.time() - start_time) * 1000,
+                raw_response="",
+                parse_success=False,
+                model=self.model,
+            )
+
+    def health_check(self) -> bool:
+        """检查 DeepSeek V4 API 是否可用。"""
+        if not self.api_key:
+            return False
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "Say hi in JSON format: {\"text\": \"hello\"}"}],
+                max_tokens=10,
+                response_format={"type": "json_object"},
+            )
+            return bool(response.choices)
+        except Exception:
+            return False
+
+
 class MockExecutor(BaseExecutor):
     """
     模拟执行器（用于测试和回测）。
@@ -684,6 +844,30 @@ class LLMTradingAgent:
                 model=model or "glm-5",
                 api_key=api_key,
                 base_url=base_url or "https://coding.dashscope.aliyuncs.com/v1",
+                timeout=timeout,
+                temperature=temperature,
+            )
+        elif executor_type == "deepseek_v4":
+            # DeepSeek V4 官方 API，支持 JSON Output
+            # API Key 从 DEEPSEEK_API_KEY 环境变量读取
+            if api_key is None:
+                api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+            return DeepSeekV4Executor(
+                model=model or "deepseek-v4-flash",
+                api_key=api_key,
+                base_url=base_url or "https://api.deepseek.com",
+                timeout=timeout,
+                temperature=temperature,
+            )
+        elif executor_type == "nvidia":
+            # NVIDIA NIM 使用 OpenAI 兼容格式
+            # API Key 从 NVIDIA_API_KEY 环境变量读取
+            if api_key is None:
+                api_key = os.environ.get("NVIDIA_API_KEY", "")
+            return DeepSeekExecutor(
+                model=model or "deepseek-ai/deepseek-v3.2",
+                api_key=api_key,
+                base_url=base_url or "https://integrate.api.nvidia.com/v1",
                 timeout=timeout,
                 temperature=temperature,
             )
@@ -1247,11 +1431,27 @@ class SmartPromptAgent(LLMTradingAgent):
         if timestamp is not None:
             ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
             cache_key = f"{symbol}_{ts_str}"
+            current_date = ts_str[:10] if len(ts_str) >= 10 else str(timestamp)
         else:
             cache_key = f"{symbol}_{hash(news_text)}"
+            ts_str = ""
+            current_date = ""
 
         if self.use_cache and cache_key in self._cache:
             cached = self._cache[cache_key]
+
+            # 缓存命中也要注册到 memory_store，否则断点续传时后续条目的决策历史会缺失
+            if current_date:
+                from .memory import DecisionRecord
+                record = DecisionRecord(
+                    date=current_date,
+                    symbol=symbol,
+                    signal=cached.signal,
+                    confidence=cached.confidence,
+                    reasoning=cached.reasoning,
+                )
+                self.memory_store.add_record(record)
+
             return LLMResponse(
                 signal=cached.signal,
                 confidence=cached.confidence,
@@ -1265,8 +1465,6 @@ class SmartPromptAgent(LLMTradingAgent):
             )
 
         # ========== 数据增强 ==========
-        ts_str = ts_str if timestamp is not None else ""
-        current_date = ts_str[:10] if len(ts_str) >= 10 else str(timestamp) if timestamp else ""
 
         enriched_context = ""
         technical_summary = ""
@@ -1378,13 +1576,52 @@ class SmartPromptAgent(LLMTradingAgent):
             self._load_cache(cache_path)
 
         results: list[dict] = []
-        request_delay = 2.0
+        cached_count = 0
+
+        # NVIDIA Qwen3.5-397B 限速约 38次/5分钟，需加大间隔
+        # 其他模型保持 2 秒
+        is_nvidia_qwen = self.executor_type == "nvidia" and "qwen" in (self.executor.model or "").lower()
+        request_delay = 10.0 if is_nvidia_qwen else 2.0
 
         for news in tqdm(sorted_news, desc="SmartPrompt Agent Analysis", unit="news"):
             timestamp = news.get("timestamp") or news.get("decision_date")
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp)
 
+            # 提前构建 cache_key 用于快速判断
+            if timestamp is not None:
+                ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+                cache_key = f"{symbol}_{ts_str}"
+                current_date = ts_str[:10] if len(ts_str) >= 10 else str(timestamp)
+            else:
+                cache_key = f"{symbol}_{hash(news.get('aggregated_content', ''))}"
+                ts_str = ""
+                current_date = ""
+
+            # 缓存命中：直接跳过 LLM 调用和 sleep，极速前进
+            if self.use_cache and cache_key in self._cache:
+                cached = self._cache[cache_key]
+
+                # 注册到 memory_store，保持决策历史链不断
+                if current_date:
+                    from .memory import DecisionRecord
+                    self.memory_store.add_record(DecisionRecord(
+                        date=current_date, symbol=symbol,
+                        signal=cached.signal, confidence=cached.confidence,
+                        reasoning=cached.reasoning,
+                    ))
+
+                results.append({
+                    "timestamp": timestamp, "symbol": symbol,
+                    "llm_signal": cached.signal, "reasoning": cached.reasoning,
+                    "latency_ms": 0, "confidence": cached.confidence,
+                    "model": cached.model, "parse_success": True,
+                    "raw_response": "[CACHE HIT]",
+                })
+                cached_count += 1
+                continue
+
+            # 缓存未命中：正常调用 LLM
             news_text = news.get(
                 "aggregated_content",
                 news.get("structured_summary", news.get("text", news.get("content", "")))
@@ -1413,10 +1650,9 @@ class SmartPromptAgent(LLMTradingAgent):
 
             # 实时追加保存：从 self._cache 获取完整数据（包含 enriched_summary 和 agent_mode）
             if cache_path and result.get("latency_ms", 0) > 0:
-                ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
-                cache_key = f"{symbol}_{ts_str}"
-                if cache_key in self._cache:
-                    cached_entry = self._cache[cache_key]
+                cache_key_save = f"{symbol}_{ts_str}"
+                if cache_key_save in self._cache:
+                    cached_entry = self._cache[cache_key_save]
                     cache_path.parent.mkdir(parents=True, exist_ok=True)
                     import fcntl
                     with open(cache_path, "a", encoding="utf-8") as f:
@@ -1428,12 +1664,6 @@ class SmartPromptAgent(LLMTradingAgent):
 
             results.append(result)
             time.sleep(request_delay)
-
-        # 保存记忆（可选）
-        if self.memory_store:
-            memory_path = self.cache_dir / f"agent_memory_{symbol}.jsonl"
-            self.memory_store.save_jsonl(memory_path)
-            logger.info(f"决策记忆已保存: {memory_path} ({len(self.memory_store)} 条)")
 
         if cache_path and results:
             logger.info(f"缓存已实时保存到: {cache_path}")

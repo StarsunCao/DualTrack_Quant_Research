@@ -9,8 +9,8 @@ executors:
     model: "qwen2.5:7b"
     base_url: "http://localhost:11434"
     timeout: 120
-    temperature: 0.7
-    max_tokens: 1024
+    temperature: 0.1
+    max_tokens: 4096
 
   deepseek-v3.2:
     name: "DeepSeek V3.2"
@@ -19,9 +19,8 @@ executors:
     model: "deepseek-ai/DeepSeek-V3.2"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 120
-    temperature: 0.7
-    max_tokens: 4096
-    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+    temperature: 0.1
+    max_tokens: 8192
 
   deepseek-v3.2-reasoning:
     name: "DeepSeek V3.2 Reasoning"
@@ -30,11 +29,10 @@ executors:
     model: "Pro/deepseek-ai/DeepSeek-V3.2"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 120
-    temperature: 0.7
-    max_tokens: 4096
+    temperature: 0.1
+    max_tokens: 8192
     reasoning: true
     reasoning_effort: "medium"
-    # API Key 从环境变量读取: SILICONFLOW_API_KEY
 
   deepseek-r1-14b:
     name: "DeepSeek R1 14B"
@@ -43,9 +41,8 @@ executors:
     model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 120
-    temperature: 0.7
-    max_tokens: 2048
-    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+    temperature: 0.1
+    max_tokens: 8192
 
   deepseek-r1-8b:
     name: "DeepSeek R1 8B"
@@ -54,9 +51,8 @@ executors:
     model: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 120
-    temperature: 0.7
-    max_tokens: 2048
-    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+    temperature: 0.1
+    max_tokens: 8192
 
   qwen3.5:
     name: "Qwen3.5 397B"
@@ -65,9 +61,8 @@ executors:
     model: "Qwen/Qwen3.5-397B-A17B"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 300
-    temperature: 0.7
-    max_tokens: 4096
-    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+    temperature: 0.1
+    max_tokens: 8192
 
   qwen3.5-9b:
     name: "Qwen3.5 9B"
@@ -76,9 +71,8 @@ executors:
     model: "Qwen/Qwen3.5-9B"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 300
-    temperature: 0.7
-    max_tokens: 2048
-    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+    temperature: 0.1
+    max_tokens: 8192
 
   glm-5:
     name: "GLM-5"
@@ -87,9 +81,8 @@ executors:
     model: "Pro/zai-org/GLM-5"
     base_url: "https://api.siliconflow.cn/v1"
     timeout: 300
-    temperature: 0.7
-    max_tokens: 4096
-    # API Key 从环境变量读取: SILICONFLOW_API_KEY
+    temperature: 0.1
+    max_tokens: 8192
 
   glm-5-dashscope:
     name: "GLM-5 (DashScope)"
@@ -98,9 +91,48 @@ executors:
     model: "glm-5"
     base_url: "https://coding.dashscope.aliyuncs.com/v1"
     timeout: 300
-    temperature: 0.7
-    max_tokens: 4096
-    # API Key 从环境变量读取: DASHSCOPE_API_KEY 或直接传入
+    temperature: 0.1
+    max_tokens: 8192
+
+  deepseek-v3.2-nvidia:
+    name: "DeepSeek V3.2 (NVIDIA)"
+    description: "DeepSeek V3.2 (通过 NVIDIA NIM API)"
+    type: "cloud"
+    model: "deepseek-ai/deepseek-v3.2"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    timeout: 300
+    temperature: 0.1
+    max_tokens: 8192
+
+  gemma-4-31b:
+    name: "Gemma 4 31B IT (NVIDIA)"
+    description: "Google Gemma 4 31B Instruct (通过 NVIDIA NIM API)"
+    type: "cloud"
+    model: "google/gemma-4-31b-it"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    timeout: 300
+    temperature: 0.1
+    max_tokens: 8192
+
+  qwen3.5-397b:
+    name: "Qwen3.5 397B A17B (NVIDIA)"
+    description: "Qwen/Qwen3.5-397B-A17B (通过 NVIDIA NIM API)"
+    type: "cloud"
+    model: "qwen/qwen3.5-397b-a17b"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    timeout: 300
+    temperature: 0.1
+    max_tokens: 16384
+
+  deepseek-v4-flash:
+    name: "DeepSeek V4 Flash"
+    description: "DeepSeek V4 Flash (通过官方 API，支持 JSON Output)"
+    type: "cloud"
+    model: "deepseek-v4-flash"
+    base_url: "https://api.deepseek.com"
+    timeout: 120
+    temperature: 0.1
+    max_tokens: 8192
 
   mock:
     name: "Mock"
