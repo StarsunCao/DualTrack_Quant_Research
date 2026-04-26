@@ -33,6 +33,8 @@ class MarketConfig:
         trading_calendar: 交易日历标识
         timezone: 市场时区
         settlement_days: 结算天数
+        ema_alpha: EMA 平滑系数（信号→仓位转换时使用）
+        decay_rate: 中性信号衰减速率（hold/neutral 时逐步减仓）
     """
     market_type: MarketType
     allow_short_selling: bool
@@ -42,6 +44,8 @@ class MarketConfig:
     min_commission: float
     commission_rate: float
     sec_fee_rate: float = 0.0  # 美股专用
+    ema_alpha: float = 0.50  # EMA 平滑系数
+    decay_rate: float = 0.80  # 中性信号衰减速率
     trading_calendar: str = "SSE"  # 'SSE' (上交所) 或 'NASDAQ'
     timezone: str = "Asia/Shanghai"
     settlement_days: int = 1  # T+1 结算
@@ -62,6 +66,8 @@ class MarketConfig:
             stamp_duty=0.001,  # 印花税 0.1%（千分之一）
             min_commission=5.0,  # 最低佣金 5 元
             commission_rate=0.0002,  # 佣金万分之二
+            ema_alpha=0.30,  # 强 EMA 平滑
+            decay_rate=0.70,  # 快速衰减
             trading_calendar="SSE",  # 上交所交易日历
             timezone="Asia/Shanghai",
             settlement_days=1,
@@ -84,6 +90,8 @@ class MarketConfig:
             min_commission=0.0,  # 无最低佣金
             commission_rate=0.0,  # 大部分券商零佣金
             sec_fee_rate=0.0000207,  # SEC 费率（2024年标准）
+            ema_alpha=0.50,  # 中等 EMA 平滑
+            decay_rate=0.80,  # 缓慢衰减
             trading_calendar="NASDAQ",  # 纳斯达克交易日历
             timezone="America/New_York",
             settlement_days=1,
