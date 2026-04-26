@@ -188,13 +188,23 @@ class MarketEnricher:
         lines = [f"近{window}日走势:"]
         lines.append("日期      收盘价    涨跌幅    成交量")
 
-        for idx, row in df.iterrows():
+        # 获取 window 之前一天的收盘价，用于计算第一行的涨跌幅
+        all_hist = self.historical
+        if len(all_hist) > window:
+            pre_window_close = all_hist.iloc[-(window + 1)]["close"]
+        else:
+            pre_window_close = None
+
+        for i, (idx, row) in enumerate(df.iterrows()):
             date_str = idx.strftime("%m-%d")
             close = row["close"]
             volume = row["volume"]
 
-            # 计算涨跌幅（与前一天比较）
-            if len(lines) > 2:  # 不是第一行
+            # 计算涨跌幅（与前一交易日比较）
+            if i == 0 and pre_window_close is not None:
+                change_pct = (close - pre_window_close) / pre_window_close * 100
+                change_str = f"{change_pct:+.1f}%"
+            elif i > 0:
                 prev_close = prev_row["close"]
                 change_pct = (close - prev_close) / prev_close * 100
                 change_str = f"{change_pct:+.1f}%"

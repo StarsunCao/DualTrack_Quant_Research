@@ -344,7 +344,7 @@ class DualTrackStrategy(bt.Strategy):
         ("rebalance_freq", 1),  # 调仓频率
         ("printlog", True),  # 打印日志
         ("allow_short", False),  # 是否允许做空（美股为True）
-        ("short_confidence_threshold", 0.85),  # 做空所需的最低置信度
+        ("short_confidence_threshold", 0.10),  # 做空所需的最低置信度(映射后)。新映射 (C-0.5)*2 下，0.10 对应 confidence 0.55+
     )
 
     def __init__(self) -> None:

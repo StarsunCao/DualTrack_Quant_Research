@@ -194,48 +194,42 @@ class DecisionMemoryStore:
         current_date: pd.Timestamp,
     ) -> Optional[float]:
         """
-        计算某决策日的真实收益率。
+        计算某决策记录对应的真实收益率。
 
-        查找 date 日的收盘价与次日（下一个交易日）收盘价，计算收益率。
-        严格确保次日日期 < current_date（不使用未来数据）。
+        DecisionRecord 的 date 是执行日（T日），即该决策将在当天开盘建仓。
+        实际收益 = T 日当天的开收盘涨跌 = (T收盘 - T开盘) / T开盘。
+
+        时间线：
+          T-1日收盘后: LLM 用 T-1 日数据做出针对 T 日的决策
+          T  日开盘: 以开盘价建仓（record.date = T 日）
+          T  日收盘: 盈亏已知
+          T+1日: 生成决策历史，T 日已收盘，收益可知
 
         Args:
-            date: 决策日期。
+            date: 决策记录的执行日（即建仓日）。
             ohlcv_df: OHLCV 数据。
             current_date: 当前模拟日期。
 
         Returns:
-            收益率，或 None（如果找不到次日数据）。
+            收益率，或 None（如果执行日尚未收盘）。
         """
         date_ts = pd.Timestamp(date)
-        # 只使用 current_date 之前的数据
-        historical = ohlcv_df[ohlcv_df.index < current_date]
+        # 使用 <= current_date 的数据
+        historical = ohlcv_df[ohlcv_df.index <= current_date]
         if historical.empty:
             return None
 
-        # 找到 date 对应的交易日索引
+        # date 本身就是执行日，直接用当天的开收盘
         if date_ts not in historical.index:
-            # 如果日期不在索引中，找最接近的前一个交易日
             available = historical.index[historical.index <= date_ts]
             if len(available) == 0:
                 return None
             date_ts = available[-1]
 
-        # 找到次日（下一个交易日）的收盘价
-        date_idx = historical.index.get_loc(date_ts)
-        if date_idx >= len(historical) - 1:
-            # 这是最后一个交易日，没有次日数据
-            return None
+        open_price = historical.loc[date_ts, "open"]
+        close = historical.loc[date_ts, "close"]
 
-        next_date = historical.index[date_idx + 1]
-        # 确保次日也 < current_date（双重保险）
-        if next_date >= current_date:
-            return None
-
-        close_t = historical.loc[date_ts, "close"]
-        close_t1 = historical.loc[next_date, "close"]
-
-        return (close_t1 - close_t) / close_t
+        return (close - open_price) / open_price
 
     def _format_outcome(self, actual_return: float, signal: str) -> str:
         """

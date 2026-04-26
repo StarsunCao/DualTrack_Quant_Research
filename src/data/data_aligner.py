@@ -314,11 +314,8 @@ class DataAligner:
             if market_type == "US_MARKET":
                 group = group.copy()
 
-                # 按重要性排序（标题长度 + 内容长度）
-                if "content" in group.columns:
-                    group["importance"] = group["title"].str.len() + group["content"].str.len()
-                else:
-                    group["importance"] = group["title"].str.len()
+                # 按标题长度排序（美股 title == content，按标题长度即可）
+                group["importance"] = group["title"].str.len()
 
                 # 限制每天最多 N 条新闻
                 group = group.nlargest(max_news_per_day, "importance")
@@ -326,35 +323,9 @@ class DataAligner:
                 # 统计各来源数量
                 source_counts = group[source_col].value_counts().to_dict() if source_col in group.columns else {}
 
-                # 格式化新闻内容
+                # 格式化新闻项：美股仅保留标题（content 与 title 相同，避免冗余）
                 def format_us_news_item(row):
-                    """美股新闻格式化：保留标题+正文"""
-                    title = row['title']
-                    content = row.get('content', '')
-
-                    if content and isinstance(content, str):
-                        content = content.replace('\n', ' ').strip()
-                        # 英文智能截断：按句号分割
-                        max_len = 200
-                        if len(content) > max_len:
-                            sentences = content.split('. ')
-                            truncated = []
-                            current_len = 0
-                            for sentence in sentences:
-                                if current_len + len(sentence) + 2 <= max_len:
-                                    truncated.append(sentence)
-                                    current_len += len(sentence) + 2
-                                else:
-                                    break
-                            if truncated:
-                                content_short = '. '.join(truncated) + '.'
-                            else:
-                                content_short = content[:max_len].rsplit(' ', 1)[0] + '...'
-                        else:
-                            content_short = content
-                        return f"{title}: {content_short}"
-                    else:
-                        return title
+                    return row['title']
 
                 # 构建新闻列表
                 news_items = [format_us_news_item(row) for _, row in group.iterrows()]
@@ -579,21 +550,44 @@ class DataAligner:
             )
 
             if has_us_format:
-                # 美股市场：直接合并 aggregated_content 字段
-                all_contents = []
+                # 美股市场：多日合并，按日期递近程度递减配额
+                # T-1 日（最新）：48 条
+                # T-2 日（次新）：24 条
+                # T-3 日及更早：12 条
+                # 防止周末新闻合并后上下文爆炸
+                day_quotas = [48, 24, 12]  # 按时间从近到远递减
+                all_items = []
                 total_news = 0
-                for _, row in group.iterrows():
-                    content = str(row.get('aggregated_content', '')).strip()
-                    if content:
-                        date_label = row[timestamp_col].strftime('%m-%d')
-                        # 添加日期标签
-                        all_contents.append(f"[{date_label}]\n{content}")
-                        total_news += row.get('news_count', 1)
+                source_counts = {}
 
-                # 合并内容，限制总长度
-                combined_content = "\n\n".join(all_contents)
-                content_limit = 5000
-                combined_content = combined_content[:content_limit]
+                # group 已按降序排列（最新在前）
+                for day_idx, (_, row) in enumerate(group.iterrows()):
+                    content = str(row.get('aggregated_content', '')).strip()
+                    if not content:
+                        continue
+
+                    date_label = row[timestamp_col].strftime('%m-%d')
+                    quota = day_quotas[min(day_idx, len(day_quotas) - 1)]
+
+                    # 解析该日的新闻条目
+                    lines = [l for l in content.split('\n') if l.startswith('- ')]
+                    selected = lines[:quota]
+
+                    if selected:
+                        date_content = f"[{date_label}]\n" + "\n".join(selected)
+                        all_items.append(date_content)
+                        total_news += len(selected)
+
+                    # 合并来源统计
+                    sc_str = row.get('source_counts', '{}')
+                    try:
+                        sc = json.loads(sc_str)
+                        for k, v in sc.items():
+                            source_counts[k] = source_counts.get(k, 0) + v
+                    except Exception:
+                        pass
+
+                combined_content = "\n\n".join(all_items)
 
                 # 取最新的新闻日期作为代表
                 news_date = group[timestamp_col].max()

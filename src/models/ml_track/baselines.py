@@ -493,6 +493,12 @@ class LightGBMModel(BaseModel):
         n_estimators: int = 100,
         max_depth: int = 6,
         learning_rate: float = 0.1,
+        num_leaves: int = 31,
+        min_child_samples: int = 20,
+        subsample: float = 0.8,
+        colsample_bytree: float = 0.8,
+        reg_alpha: float = 0.0,
+        reg_lambda: float = 0.0,
         random_state: int = 42,
         verbose: int = -1,
     ) -> None:
@@ -503,6 +509,12 @@ class LightGBMModel(BaseModel):
             n_estimators: 树的数量。
             max_depth: 最大深度。
             learning_rate: 学习率。
+            num_leaves: 叶子节点数。
+            min_child_samples: 叶子节点最少样本数。
+            subsample: 数据采样比例。
+            colsample_bytree: 特征采样比例。
+            reg_alpha: L1 正则化。
+            reg_lambda: L2 正则化。
             random_state: 随机种子。
             verbose: 日志详细程度。
         """
@@ -510,6 +522,12 @@ class LightGBMModel(BaseModel):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.learning_rate = learning_rate
+        self.num_leaves = num_leaves
+        self.min_child_samples = min_child_samples
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.reg_alpha = reg_alpha
+        self.reg_lambda = reg_lambda
         self.random_state = random_state
         self.verbose = verbose
         self.model = None
@@ -538,6 +556,12 @@ class LightGBMModel(BaseModel):
             n_estimators=self.n_estimators,
             max_depth=self.max_depth,
             learning_rate=self.learning_rate,
+            num_leaves=self.num_leaves,
+            min_child_samples=self.min_child_samples,
+            subsample=self.subsample,
+            colsample_bytree=self.colsample_bytree,
+            reg_alpha=self.reg_alpha,
+            reg_lambda=self.reg_lambda,
             random_state=self.random_state,
             verbose=self.verbose,
             n_jobs=-1,
