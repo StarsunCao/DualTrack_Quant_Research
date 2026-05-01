@@ -1717,6 +1717,8 @@ def cache_build(
                 model = "deepseek-v4-flash"
             elif executor == "dashscope":
                 model = "glm-5"  # 阿里云 DashScope GLM-5
+            elif executor == "nvidia":
+                model = "z-ai/glm-5.1"  # NVIDIA NIM GLM-5.1
             else:
                 model = "qwen2.5:7b"
 
@@ -1736,6 +1738,8 @@ def cache_build(
             model_tag = "qwen35"
         elif "Qwen3.5-9B" in model:
             model_tag = "qwen35_9b"
+        elif "glm-5.1" in model.lower():
+            model_tag = "glm5_1"
         elif "GLM-5" in model or "glm-5" in model.lower():
             model_tag = "glm5"
         elif "deepseek-v4" in model.lower() or executor == "deepseek_v4":
@@ -2080,6 +2084,8 @@ def run_llm_agent_backtest(
                 model = "deepseek-v4-flash"
             elif executor == "dashscope":
                 model = "glm-5"
+            elif executor == "nvidia":
+                model = "z-ai/glm-5.1"
             else:
                 model = "qwen2.5:7b"
 
@@ -2109,6 +2115,8 @@ def run_llm_agent_backtest(
                 model_short = "deepseek-r1-8b"
             elif "deepseek-v4" in model.lower():
                 model_short = "deepseek-v4-flash"
+            elif "glm-5.1" in model.lower():
+                model_short = "glm5_1"
         else:
             model_short = executor.replace(".", "_")
         cache_file = Path(output_dir) / f"llm_cache_{symbol}_{model_short}_agent.jsonl"

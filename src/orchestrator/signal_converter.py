@@ -28,6 +28,8 @@ class SignalConverter:
         symbol: str,
         ema_alpha: float = 0.50,
         decay_rate: float = 0.80,
+        weak_buy_threshold: float = 0.55,
+        weak_short_threshold: float = 0.60,
     ) -> pd.DataFrame:
         """
         对信号权重应用 EMA 平滑和动态衰减。
@@ -42,6 +44,8 @@ class SignalConverter:
             symbol: 资产代码
             ema_alpha: EMA 平滑系数 (0-1)，越大越灵敏
             decay_rate: 衰减速率 (0-1)，越小衰减越快
+            weak_buy_threshold: weak buy 置信度阈值，低于此值视为观望
+            weak_short_threshold: weak short 置信度阈值，低于此值视为清仓
 
         Returns:
             添加了 smoothed_weight 列的 DataFrame
@@ -50,15 +54,22 @@ class SignalConverter:
         daily_df = daily_df.sort_values("timestamp").reset_index(drop=True)
 
         # 判断仓位意图
-        signal_col = daily_df.get("signal", "").str.lower()
-        conf_col = daily_df.get("confidence", 0.5)
+        # ML 信号可能只有 weight 列（无 signal/confidence），此时统一用 EMA 平滑
+        has_signal_col = "signal" in daily_df.columns
+        if has_signal_col:
+            signal_col = daily_df["signal"].astype(str).str.lower()
+            conf_col = daily_df.get("confidence", pd.Series([0.5] * len(daily_df)))
 
-        # weak buy：信号是 buy 但 conf < 0.55 → 视为观望，维持当前仓位
-        # weak short：信号是 short 但 conf < 0.55 → 视为"勉强做空，清仓观望"
-        is_weak_buy = (signal_col == "buy") & (conf_col < 0.55)
-        is_weak_short = (signal_col == "short") & (conf_col < 0.60)
-        is_hold = signal_col.isin(["hold", "neutral"]) | is_weak_buy  # 观望
-        is_sell = signal_col.isin(["sell"]) | is_weak_short  # 清仓
+            # weak buy：信号是 buy 但 conf < threshold → 视为观望，维持当前仓位
+            # weak short：信号是 short 但 conf < threshold → 视为"勉强做空，清仓观望"
+            is_weak_buy = (signal_col == "buy") & (conf_col < weak_buy_threshold)
+            is_weak_short = (signal_col == "short") & (conf_col < weak_short_threshold)
+            is_hold = signal_col.isin(["hold", "neutral"]) | is_weak_buy  # 观望
+            is_sell = signal_col.isin(["sell"]) | is_weak_short  # 清仓
+        else:
+            # ML 信号（只有 weight 列）：正常 buy/short 用 EMA，零值用衰减
+            is_hold = daily_df["weight"] == 0.0
+            is_sell = pd.Series([False] * len(daily_df))
 
         smoothed = []
         prev_weight = 0.0
@@ -288,8 +299,14 @@ class SignalConverter:
 
         # EMA 平滑 + 动态衰减
         symbol = daily_df['symbol'].iloc[0] if 'symbol' in daily_df.columns else "CSI300"
+        from ..config.market_config import MarketConfig
+        market_config = MarketConfig.get_config_for_symbol(symbol)
         daily_df = SignalConverter._apply_ema_smoothing(
-            daily_df, symbol, ema_alpha, decay_rate
+            daily_df, symbol,
+            ema_alpha=market_config.ema_alpha,
+            decay_rate=market_config.decay_rate,
+            weak_buy_threshold=market_config.weak_buy_threshold,
+            weak_short_threshold=market_config.weak_short_threshold,
         )
         # 用 smoothed_weight 覆盖 weight
         daily_df['weight'] = daily_df['smoothed_weight']

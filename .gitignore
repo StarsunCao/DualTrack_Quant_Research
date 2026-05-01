@@ -51,3 +51,6 @@ htmlcov/
 # 备份文件
 *_backup.jsonl
 *_backup.*
+
+# 论文相关
+thesis/

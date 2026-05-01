@@ -46,6 +46,8 @@ class MarketConfig:
     sec_fee_rate: float = 0.0  # 美股专用
     ema_alpha: float = 0.50  # EMA 平滑系数
     decay_rate: float = 0.80  # 中性信号衰减速率
+    weak_buy_threshold: float = 0.55  # weak buy 置信度阈值
+    weak_short_threshold: float = 0.60  # weak short 置信度阈值
     trading_calendar: str = "SSE"  # 'SSE' (上交所) 或 'NASDAQ'
     timezone: str = "Asia/Shanghai"
     settlement_days: int = 1  # T+1 结算
@@ -68,6 +70,7 @@ class MarketConfig:
             commission_rate=0.0002,  # 佣金万分之二
             ema_alpha=0.30,  # 强 EMA 平滑
             decay_rate=0.70,  # 快速衰减
+            weak_buy_threshold=0.60,  # 严格 weak buy 阈值
             trading_calendar="SSE",  # 上交所交易日历
             timezone="Asia/Shanghai",
             settlement_days=1,
@@ -92,6 +95,8 @@ class MarketConfig:
             sec_fee_rate=0.0000207,  # SEC 费率（2024年标准）
             ema_alpha=0.50,  # 中等 EMA 平滑
             decay_rate=0.80,  # 缓慢衰减
+            weak_buy_threshold=0.55,  # 标准 weak buy 阈值
+            weak_short_threshold=0.60,  # 标准 weak short 阈值
             trading_calendar="NASDAQ",  # 纳斯达克交易日历
             timezone="America/New_York",
             settlement_days=1,

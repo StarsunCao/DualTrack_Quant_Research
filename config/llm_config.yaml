@@ -114,6 +114,16 @@ executors:
     temperature: 0.1
     max_tokens: 8192
 
+  glm-5.1-nvidia:
+    name: "GLM-5.1 (NVIDIA)"
+    description: "GLM-5.1 (通过 NVIDIA NIM API，支持思考模式)"
+    type: "cloud"
+    model: "z-ai/glm-5.1"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    timeout: 300
+    temperature: 0.1
+    max_tokens: 16384
+
   qwen3.5-397b:
     name: "Qwen3.5 397B A17B (NVIDIA)"
     description: "Qwen/Qwen3.5-397B-A17B (通过 NVIDIA NIM API)"

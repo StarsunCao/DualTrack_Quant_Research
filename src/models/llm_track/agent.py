@@ -1578,10 +1578,11 @@ class SmartPromptAgent(LLMTradingAgent):
         results: list[dict] = []
         cached_count = 0
 
-        # NVIDIA Qwen3.5-397B 限速约 38次/5分钟，需加大间隔
+        # NVIDIA 模型限速（Qwen/GLM 均约 38次/5分钟），需加大间隔
         # 其他模型保持 2 秒
-        is_nvidia_qwen = self.executor_type == "nvidia" and "qwen" in (self.executor.model or "").lower()
-        request_delay = 15.0 if is_nvidia_qwen else 2.0
+        model_name = (self.executor.model or "").lower()
+        is_nvidia_rate_limited = self.executor_type == "nvidia" and ("qwen" in model_name or "glm" in model_name)
+        request_delay = 15.0 if is_nvidia_rate_limited else 2.0
 
         for news in tqdm(sorted_news, desc="SmartPrompt Agent Analysis", unit="news"):
             timestamp = news.get("timestamp") or news.get("decision_date")
