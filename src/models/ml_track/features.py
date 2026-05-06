@@ -20,8 +20,22 @@ class FeatureEngineer:
         feature_names: 计算后的特征名称列表。
     """
 
-    def __init__(self) -> None:
-        """初始化特征工程器。"""
+    def __init__(self, feature_subset: list[str] | None = None) -> None:
+        """初始化特征工程器。
+
+        Args:
+            feature_subset: 要保留的特征子集。如果为 None，使用全部特征。
+                核心特征列表（15-20个）：
+                ['return_5d', 'return_10d', 'return_20d',
+                 'momentum_5d', 'momentum_10d',
+                 'rsi_14', 'macd', 'macd_histogram',
+                 'bb_width', 'bb_position',
+                 'volatility_10d', 'atr_10d',
+                 'volume_ma_10d', 'volume_ratio_10d',
+                 'intraday_range', 'close_to_open',
+                 'ma_cross_5_20']
+        """
+        self.feature_subset = feature_subset
         self.feature_names: list[str] = []
 
     @staticmethod
@@ -409,6 +423,15 @@ class FeatureEngineer:
 
         # 记录特征名称
         self.feature_names = [col for col in result.columns if col not in ohlcv_cols]
+
+        # 如果指定了特征子集，只保留选中的特征
+        if self.feature_subset is not None:
+            valid_subset = [f for f in self.feature_subset if f in result.columns]
+            if valid_subset:
+                self.feature_names = valid_subset
+                # 只保留子集列 + OHLCV 列
+                keep_cols = set(ohlcv_cols) | set(valid_subset)
+                result = result[[c for c in result.columns if c in keep_cols]]
 
         # 删除 NaN 行
         if drop_na:

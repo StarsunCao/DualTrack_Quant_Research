@@ -23,6 +23,9 @@ results/
 # macOS 系统临时文件
 .DS_Store
 
+# 训练生成的模型文件（体积大，可重新训练）
+models/
+
 # 后缀名补充
 *.pdf
 *.png

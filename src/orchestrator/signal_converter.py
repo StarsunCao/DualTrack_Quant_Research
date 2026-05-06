@@ -136,6 +136,7 @@ class SignalConverter:
         ohlcv_dates: pd.DatetimeIndex = None,
         ema_alpha: float = 0.50,
         decay_rate: float = 0.80,
+        signal_threshold: float = 0.55,
     ) -> dict:
         """
         将 ML 信号转换为目标仓位。
@@ -145,6 +146,8 @@ class SignalConverter:
             ohlcv_dates: OHLCV数据的日期索引，用于对齐
             ema_alpha: EMA 平滑系数
             decay_rate: 动态衰减速率
+            signal_threshold: 信号阈值，只有 signal_strength > threshold 或
+                < (1-threshold) 才触发仓位变化，中间视为 neutral
 
         Returns:
             目标仓位字典 {datetime: {symbol: weight}}
@@ -166,7 +169,11 @@ class SignalConverter:
             grouped = ml_signals.groupby("timestamp")
             for timestamp, group in grouped:
                 avg_signal = group["signal_strength_0_to_1"].mean()
-                weight = (avg_signal - 0.5) * 2  # 0-1 → -1到1
+                # 阈值过滤：弱信号视为 neutral（维持仓位）
+                if (1 - signal_threshold) < avg_signal < signal_threshold:
+                    weight = 0.0  # neutral，EMA 会维持当前仓位
+                else:
+                    weight = (avg_signal - 0.5) * 2  # 0-1 → -1到1
                 symbol = group["symbol"].iloc[0] if "symbol" in group.columns else "CSI300"
                 positions[pd.Timestamp(timestamp)] = {symbol: weight}
 

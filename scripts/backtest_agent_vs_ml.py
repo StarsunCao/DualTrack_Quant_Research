@@ -94,6 +94,65 @@ def _tune_hyperparams(ml_model_name: str, X_tr: np.ndarray, y_tr: np.ndarray, fe
               f"(CV acc={search.best_score_:.4f})")
         return best
 
+    elif ml_model_name == 'lstm':
+        from sklearn.base import BaseEstimator, ClassifierMixin
+        from sklearn.model_selection import RandomizedSearchCV
+        from src.models.ml_track.baselines import LSTMModel
+
+        class LSTMWrapper(BaseEstimator, ClassifierMixin):
+            """sklearn 包装器，使 LSTM 可用于 RandomizedSearchCV。"""
+            def __init__(self, hidden_dim=64, num_layers=2, dropout=0.2,
+                         learning_rate=0.001, sequence_length=20, epochs=50):
+                self.hidden_dim = hidden_dim
+                self.num_layers = num_layers
+                self.dropout = dropout
+                self.learning_rate = learning_rate
+                self.sequence_length = sequence_length
+                self.epochs = epochs
+
+            def fit(self, X, y):
+                self.model_ = LSTMModel(
+                    input_dim=X.shape[1],
+                    hidden_dim=self.hidden_dim,
+                    num_layers=self.num_layers,
+                    dropout=self.dropout,
+                    learning_rate=self.learning_rate,
+                    sequence_length=self.sequence_length,
+                    epochs=self.epochs,
+                    early_stopping_patience=10,
+                )
+                self.model_.fit(X, y)
+                self.classes_ = [0, 1]
+                return self
+
+            def predict(self, X):
+                return (self.model_.predict_proba(X) >= 0.5).astype(int)
+
+            def predict_proba(self, X):
+                proba = self.model_.predict_proba(X)
+                return np.column_stack([1 - proba, proba])
+
+        # 搜索空间（epochs 降低以加速搜索）
+        param_dist = {
+            'hidden_dim': [32, 64, 128, 256],
+            'num_layers': [1, 2, 3],
+            'dropout': [0.1, 0.2, 0.3, 0.5],
+            'learning_rate': [0.0001, 0.0005, 0.001, 0.005],
+            'sequence_length': [10, 20, 30, 40],
+            'epochs': [30],
+        }
+        base = LSTMWrapper()
+        search = RandomizedSearchCV(
+            base, param_dist, n_iter=15, cv=cv, scoring='accuracy',
+            random_state=42, n_jobs=1,  # n_jobs=1 避免 GPU/MPS 冲突
+        )
+        search.fit(X_tr, y_tr)
+        best = search.best_params_
+        print(f"  LSTM 超参搜索: hidden_dim={best['hidden_dim']}, num_layers={best['num_layers']}, "
+              f"dropout={best['dropout']}, lr={best['learning_rate']}, seq_len={best['sequence_length']} "
+              f"(CV acc={search.best_score_:.4f})")
+        return best
+
     else:
         return {}
 
@@ -117,9 +176,22 @@ def run_ml_track_walkforward(ml_model_name: str, full_ohlcv: pd.DataFrame, train
     """
     from src.models.ml_track.features import FeatureEngineer
     from src.models.ml_track.baselines import LogisticRegressionModel, LightGBMModel, LSTMModel
+    from src.models.model_manager import get_model_manager, ModelType, ModelMetadata
 
     all_data = pd.concat([train_ohlcv, full_ohlcv])
-    fe = FeatureEngineer()
+
+    # 核心特征子集（从55个筛选到18个，减少噪声和冗余）
+    CORE_FEATURES = [
+        'return_5d', 'return_10d', 'return_20d',
+        'momentum_5d', 'momentum_10d',
+        'rsi_14', 'macd', 'macd_histogram',
+        'bb_width', 'bb_position',
+        'volatility_10d', 'atr_10d',
+        'volume_ma_10d', 'volume_ratio_10d',
+        'intraday_range', 'close_to_open',
+        'ma_cross_5_20',
+    ]
+    fe = FeatureEngineer(feature_subset=CORE_FEATURES)
     all_features = fe.compute_all_features(all_data, drop_na=False)
 
     test_dates = full_ohlcv.index
@@ -156,7 +228,18 @@ def run_ml_track_walkforward(ml_model_name: str, full_ohlcv: pd.DataFrame, train
                         print(f"  使用搜索到的最优参数训练...")
 
                     if ml_model_name == 'lstm':
-                        model = ModelClass(input_dim=X_tr.shape[1])
+                        if best_params:
+                            model = LSTMModel(
+                                input_dim=X_tr.shape[1],
+                                hidden_dim=best_params.get('hidden_dim', 64),
+                                num_layers=best_params.get('num_layers', 2),
+                                dropout=best_params.get('dropout', 0.2),
+                                learning_rate=best_params.get('learning_rate', 0.001),
+                                sequence_length=best_params.get('sequence_length', 20),
+                                epochs=best_params.get('epochs', 50),
+                            )
+                        else:
+                            model = ModelClass(input_dim=X_tr.shape[1])
                     elif ml_model_name == 'lr':
                         if best_params:
                             model = LogisticRegressionModel(
@@ -182,6 +265,38 @@ def run_ml_track_walkforward(ml_model_name: str, full_ohlcv: pd.DataFrame, train
                             model = ModelClass()
                     model.fit(X_tr, y_tr)
                     retrain_count += 1
+
+                    # 持久化模型
+                    model_type_map = {'lr': ModelType.LOGISTIC_REGRESSION, 'lgb': ModelType.LIGHTGBM, 'lstm': ModelType.LSTM}
+                    manager = get_model_manager()
+                    meta = ModelMetadata(
+                        model_name=f"{symbol}_{ml_model_name.upper()}",
+                        model_type=model_type_map[ml_model_name].value,
+                        training_samples=len(X_tr),
+                        feature_count=len(feature_cols),
+                        feature_names=feature_cols,
+                        hyperparameters={k: str(v) for k, v in (best_params or {}).items()},
+                        metrics={
+                            "cv_accuracy": 0,
+                            "training_samples": len(X_tr),
+                            "feature_count": len(feature_cols),
+                        },
+                        description=f"Walk-Forward 重训#{retrain_count}, 窗口 {train_start.date()}~{train_end.date()}",
+                    )
+                    saved_path = manager.save_ml_model(model, symbol, model_type_map[ml_model_name], metadata=meta)
+
+                    # 写入版本索引
+                    model_dir = manager._get_model_dir(symbol, model_type_map[ml_model_name].value)
+                    versions_path = model_dir / "versions.jsonl"
+                    with open(versions_path, "a", encoding="utf-8") as vf:
+                        json.dump({
+                            "version": saved_path.stem.replace("model_", ""),
+                            "retrain_num": retrain_count,
+                            "train_start": str(train_start.date()),
+                            "train_end": str(train_end.date()),
+                            "model_file": saved_path.name,
+                        }, vf, ensure_ascii=False)
+                        vf.write("\n")
 
         # 生成信号
         if model is not None:
@@ -209,13 +324,21 @@ def run_ml_track_walkforward(ml_model_name: str, full_ohlcv: pd.DataFrame, train
             all_probas.append(0.5)
 
     print(f"  Walk-Forward 信号: {len(all_probas)} 条, 重训 {retrain_count} 次")
-    return pd.DataFrame({
+    signals_df = pd.DataFrame({
         'timestamp': test_dates,
         'symbol': symbol,
         'model_name': ml_model_name.upper(),
         'signal_strength_0_to_1': all_probas,
         'latency_ms': 2.0 if ml_model_name == "lr" else (15.0 if ml_model_name == "lstm" else 3.0)
     })
+
+    # 信号 CSV 持久化（确保可复现）
+    signal_path = Path(f"data/signals/{symbol}_{ml_model_name.upper()}_walkforward.csv")
+    signal_path.parent.mkdir(parents=True, exist_ok=True)
+    signals_df.to_csv(signal_path, index=False)
+    print(f"  信号已保存: {signal_path}")
+
+    return signals_df
 
 
 def run_ml_track(ml_model_name: str, ohlcv_data: pd.DataFrame, symbol: str,
@@ -247,8 +370,18 @@ def run_ml_track(ml_model_name: str, ohlcv_data: pd.DataFrame, symbol: str,
     if ml_model_name == "lstm" and hasattr(model, 'model'):
         model.model = model.model.to('cpu')
 
-    # 获取特征
-    fe = FeatureEngineer()
+    # 获取特征（使用与 Walk-Forward 相同的核心子集）
+    CORE_FEATURES = [
+        'return_5d', 'return_10d', 'return_20d',
+        'momentum_5d', 'momentum_10d',
+        'rsi_14', 'macd', 'macd_histogram',
+        'bb_width', 'bb_position',
+        'volatility_10d', 'atr_10d',
+        'volume_ma_10d', 'volume_ratio_10d',
+        'intraday_range', 'close_to_open',
+        'ma_cross_5_20',
+    ]
+    fe = FeatureEngineer(feature_subset=CORE_FEATURES)
 
     # 先用历史数据扩展避免窗口损失
     if train_path.exists():
@@ -280,7 +413,7 @@ def run_ml_track(ml_model_name: str, ohlcv_data: pd.DataFrame, symbol: str,
     return signals
 
 
-def backtest_track(track_name: str, signals_df: pd.DataFrame, ohlcv_data: pd.DataFrame, symbol: str, initial_cash: float = 1000000, commission: float = 0.0002, allow_short: bool = False, confidence_mode: str = "linear"):
+def backtest_track(track_name: str, signals_df: pd.DataFrame, ohlcv_data: pd.DataFrame, symbol: str, initial_cash: float = 1000000, commission: float = 0.0002, allow_short: bool = False, confidence_mode: str = "linear", signal_threshold: float = 0.55):
     """独立回测单个轨道。"""
     from src.orchestrator.signal_converter import SignalConverter
     from src.execution.bt_engine import BacktestEngine, DualTrackStrategy
@@ -291,11 +424,12 @@ def backtest_track(track_name: str, signals_df: pd.DataFrame, ohlcv_data: pd.Dat
     ema_alpha = mkt_config.ema_alpha
     decay_rate = mkt_config.decay_rate
 
-    # 转换信号到仓位（带 EMA 平滑）
+    # 转换信号到仓位（带 EMA 平滑 + 阈值过滤）
     if "signal_strength_0_to_1" in signals_df.columns:
         positions = SignalConverter.ml_signals_to_positions(
             signals_df, ohlcv_dates=ohlcv_data.index,
             ema_alpha=ema_alpha, decay_rate=decay_rate,
+            signal_threshold=signal_threshold,
         )
     elif "signal" in signals_df.columns:
         positions = SignalConverter.llm_signals_to_positions(
@@ -324,7 +458,76 @@ def backtest_track(track_name: str, signals_df: pd.DataFrame, ohlcv_data: pd.Dat
     return result
 
 
-def main(symbol="QQQ"):
+def run_ensemble(ml_models: dict[str, pd.DataFrame], symbol: str,
+                 weights: dict[str, float] = None) -> pd.DataFrame:
+    """ML 模型集成：加权投票融合信号。
+
+    Args:
+        ml_models: {模型名: 信号DataFrame} 字典
+        symbol: 资产代码
+        weights: 权重字典，默认 {'LR': 0.4, 'LGB': 0.35, 'LSTM': 0.25}
+
+    Returns:
+        融合后的信号 DataFrame
+    """
+    if weights is None:
+        weights = {'LR': 0.4, 'LGB': 0.35, 'LSTM': 0.25}
+
+    # 收集所有模型的信号并统一到相同日期索引
+    signal_series = {}
+    for name, df in ml_models.items():
+        if df.empty:
+            continue
+        key = name.upper()[:3]  # 'LR', 'LGB', 'LST'
+        w = weights.get(key[:2], weights.get(key[:3], 0.1))
+        if key.startswith('LST'):
+            w = weights.get('LSTM', 0.25)
+        series = df.set_index('timestamp')['signal_strength_0_to_1']
+        signal_series[key] = (series, w)
+
+    if not signal_series:
+        return pd.DataFrame()
+
+    # 找到所有模型共同的日期
+    all_indices = [s.index for s, _ in signal_series.values()]
+    common_dates = all_indices[0]
+    for idx in all_indices[1:]:
+        common_dates = common_dates.intersection(idx)
+
+    if len(common_dates) == 0:
+        return pd.DataFrame()
+
+    # 加权平均
+    ensemble_proba = np.zeros(len(common_dates))
+    total_weight = 0
+    for key, (series, w) in signal_series.items():
+        ensemble_proba += series.loc[common_dates].values * w
+        total_weight += w
+
+    if total_weight > 0:
+        ensemble_proba /= total_weight
+
+    return pd.DataFrame({
+        'timestamp': common_dates,
+        'symbol': symbol,
+        'model_name': 'ENSEMBLE',
+        'signal_strength_0_to_1': ensemble_proba,
+        'latency_ms': 5.0,
+    })
+
+
+def load_signals_from_csv(symbol: str, model_name: str) -> pd.DataFrame:
+    """从持久化 CSV 加载信号（确保可复现）。"""
+    path = Path(f"data/signals/{symbol}_{model_name.upper()}_walkforward.csv")
+    if path.exists():
+        df = pd.read_csv(path, parse_dates=["timestamp"])
+        print(f"  从 CSV 加载信号: {path} ({len(df)} 条)")
+        return df
+    print(f"  ⚠️ 信号文件不存在: {path}")
+    return pd.DataFrame()
+
+
+def main(symbol="QQQ", load_signals=False):
     # 根据标的设置路径和参数
     if symbol == "QQQ":
         ohlcv_path = Path("data/raw/real_qqq_5y.csv")
@@ -333,7 +536,7 @@ def main(symbol="QQQ"):
         hist_start = "2017-10-01"
         test_start = "2018-01-01"
         start = "2018-01-02"
-        end = "2024-12-31"
+        end = "2020-07-22"
         commission = 0.0005  # 美股佣金
     else:
         ohlcv_path = Path("data/raw/real_csi300_5y.csv")
@@ -398,9 +601,15 @@ def main(symbol="QQQ"):
 
     # ========== 2. Logistic Regression ==========
     print(f"\n{'='*50}")
-    print(f"  【轨道: LR (Walk-Forward)】")
+    if load_signals:
+        print(f"  【轨道: LR (从 CSV 加载)】")
+    else:
+        print(f"  【轨道: LR (Walk-Forward)】")
     print(f"{'='*50}")
-    lr_signals = run_ml_track_walkforward("lr", full_ohlcv, train_ohlcv, symbol)
+    if load_signals:
+        lr_signals = load_signals_from_csv(symbol, "lr")
+    else:
+        lr_signals = run_ml_track_walkforward("lr", full_ohlcv, train_ohlcv, symbol)
     if not lr_signals.empty:
         result = backtest_track("lr", lr_signals, ohlcv_data, symbol, commission=commission, allow_short=allow_short)
         if result:
@@ -413,9 +622,15 @@ def main(symbol="QQQ"):
 
     # ========== 3. LSTM ==========
     print(f"\n{'='*50}")
-    print(f"  【轨道: LSTM (Walk-Forward)】")
+    if load_signals:
+        print(f"  【轨道: LSTM (从 CSV 加载)】")
+    else:
+        print(f"  【轨道: LSTM (Walk-Forward)】")
     print(f"{'='*50}")
-    lstm_signals = run_ml_track_walkforward("lstm", full_ohlcv, train_ohlcv, symbol)
+    if load_signals:
+        lstm_signals = load_signals_from_csv(symbol, "lstm")
+    else:
+        lstm_signals = run_ml_track_walkforward("lstm", full_ohlcv, train_ohlcv, symbol)
     if not lstm_signals.empty:
         result = backtest_track("lstm", lstm_signals, ohlcv_data, symbol, commission=commission, allow_short=allow_short)
         if result:
@@ -428,9 +643,15 @@ def main(symbol="QQQ"):
 
     # ========== 4. LightGBM ==========
     print(f"\n{'='*50}")
-    print(f"  【轨道: LightGBM (Walk-Forward)】")
+    if load_signals:
+        print(f"  【轨道: LightGBM (从 CSV 加载)】")
+    else:
+        print(f"  【轨道: LightGBM (Walk-Forward)】")
     print(f"{'='*50}")
-    lgb_signals = run_ml_track_walkforward("lgb", full_ohlcv, train_ohlcv, symbol)
+    if load_signals:
+        lgb_signals = load_signals_from_csv(symbol, "lgb")
+    else:
+        lgb_signals = run_ml_track_walkforward("lgb", full_ohlcv, train_ohlcv, symbol)
     if not lgb_signals.empty:
         result = backtest_track("lgb", lgb_signals, ohlcv_data, symbol, commission=commission, allow_short=allow_short)
         if result:
@@ -440,6 +661,32 @@ def main(symbol="QQQ"):
             print(f"  ✅ 夏普比率: {result.sharpe_ratio:.4f}")
             print(f"  ✅ 最大回撤: {result.max_drawdown:.2%}")
             print(f"  ✅ 日换手率: {getattr(result, 'turnover', 0):.4f}")
+
+    # ========== 5. Ensemble (LR + LGB + LSTM) ==========
+    print(f"\n{'='*50}")
+    print(f"  【轨道: ENSEMBLE (LR+LGB+LSTM)】")
+    print(f"{'='*50}")
+    ml_signal_map = {}
+    if not lr_signals.empty:
+        ml_signal_map['LR'] = lr_signals
+    if not lgb_signals.empty:
+        ml_signal_map['LGB'] = lgb_signals
+    if not lstm_signals.empty:
+        ml_signal_map['LSTM'] = lstm_signals
+
+    if len(ml_signal_map) >= 2:
+        ensemble_signals = run_ensemble(ml_signal_map, symbol)
+        if not ensemble_signals.empty:
+            result = backtest_track("ensemble", ensemble_signals, ohlcv_data, symbol, commission=commission, allow_short=allow_short)
+            if result:
+                results["Ensemble"] = result
+                print(f"  ✅ 最终资产: {result.final_value:,.2f}")
+                print(f"  ✅ 总收益率: {result.total_return:.2%}")
+                print(f"  ✅ 夏普比率: {result.sharpe_ratio:.4f}")
+                print(f"  ✅ 最大回撤: {result.max_drawdown:.2%}")
+                print(f"  ✅ 日换手率: {getattr(result, 'turnover', 0):.4f}")
+    else:
+        print(f"  ⚠️ 至少需要 2 个模型信号才能集成")
 
     # ========== 对比表格 ==========
     print(f"\n{'='*70}")
@@ -477,4 +724,46 @@ def main(symbol="QQQ"):
 
 
 if __name__ == "__main__":
-    main("QQQ")
+    import argparse
+    parser = argparse.ArgumentParser(description="ML 模型对比回测")
+    parser.add_argument("--symbol", choices=["QQQ", "CSI300"], default="QQQ", help="交易标的")
+    parser.add_argument("--list-models", action="store_true", help="列出已保存的模型")
+    parser.add_argument("--list-versions", action="store_true", help="列出模型版本索引")
+    parser.add_argument("--load-signals", action="store_true", help="从 CSV 加载信号（跳过走查训练，确保可复现）")
+    args = parser.parse_args()
+
+    if args.list_models:
+        from src.models.model_manager import get_model_manager
+        manager = get_model_manager()
+        models = manager.list_models(symbol=args.symbol)
+        if not models:
+            print(f"  未找到 {args.symbol} 的已保存模型")
+        else:
+            print(f"\n{'='*80}")
+            print(f"  {args.symbol} 已保存模型")
+            print(f"{'='*80}")
+            print(f"  {'名称':<30} {'类型':<25} {'大小(MB)':>9} {'创建时间':<22}")
+            print(f"  {'-'*30} {'-'*25} {'-'*9} {'-'*22}")
+            for m in models:
+                print(f"  {m.name:<30} {m.model_type:<25} {m.file_size_mb:>9.2f} {m.created_at:<22}")
+    elif args.list_versions:
+        model_types_info = {
+            'lr': ('logistic_regression', 'Logistic Regression'),
+            'lgb': ('lightgbm', 'LightGBM'),
+            'lstm': ('lstm', 'LSTM'),
+        }
+        for model_key, (model_type_val, display_name) in model_types_info.items():
+            model_dir = Path(f"models/{args.symbol.lower()}_{model_type_val}")
+            versions_path = model_dir / "versions.jsonl"
+            if not versions_path.exists():
+                print(f"  {display_name}: 无版本索引")
+                continue
+            print(f"\n  {display_name} ({model_dir})")
+            print(f"  {'版本':>25} {'重训#':>6} {'训练起始':>12} {'训练结束':>12} {'模型文件':>30}")
+            print(f"  {'-'*25} {'-'*6} {'-'*12} {'-'*12} {'-'*30}")
+            with open(versions_path, "r", encoding="utf-8") as vf:
+                for line in vf:
+                    v = json.loads(line)
+                    print(f"  {v['version']:>25} {v['retrain_num']:>6} {v['train_start']:>12} {v['train_end']:>12} {v['model_file']:>30}")
+    else:
+        main(args.symbol, load_signals=args.load_signals)

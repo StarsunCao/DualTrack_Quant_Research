@@ -284,6 +284,7 @@ class LSTMModel(BaseModel):
         batch_size: int = 32,
         epochs: int = 50,
         sequence_length: int = 20,
+        early_stopping_patience: int = 10,
     ) -> None:
         """
         初始化 LSTM 模型。
@@ -307,6 +308,7 @@ class LSTMModel(BaseModel):
         self.batch_size = batch_size
         self.epochs = epochs
         self.sequence_length = sequence_length
+        self.early_stopping_patience = early_stopping_patience
         self.scaler: Optional[StandardScaler] = None
         self.model: Optional[nn.Module] = None
 
@@ -367,7 +369,7 @@ class LSTMModel(BaseModel):
         **kwargs,
     ) -> "LSTMModel":
         """
-        训练 LSTM 模型。
+        训练 LSTM 模型（带 early stopping）。
 
         Args:
             X: 特征矩阵。
@@ -390,15 +392,23 @@ class LSTMModel(BaseModel):
         self.scaler = StandardScaler()
         X_scaled = self.scaler.fit_transform(X)
 
-        # 创建序列
-        X_seq, y_seq = self.create_sequences(X_scaled, y, self.sequence_length)
+        # 拆分 80/20 train/val（时间序列保持顺序）
+        split_idx = int(len(X_scaled) * 0.8)
+        X_train, X_val = X_scaled[:split_idx], X_scaled[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
 
-        if len(X_seq) == 0:
+        # 创建序列
+        X_train_seq, y_train_seq = self.create_sequences(X_train, y_train, self.sequence_length)
+        X_val_seq, y_val_seq = self.create_sequences(X_val, y_val, self.sequence_length)
+
+        if len(X_train_seq) == 0:
             raise ValueError(f"数据量不足，无法创建长度为 {self.sequence_length} 的序列")
 
         # 转换为 PyTorch 张量
-        X_tensor = torch.FloatTensor(X_seq).to(DEVICE)
-        y_tensor = torch.FloatTensor(y_seq).unsqueeze(1).to(DEVICE)
+        X_train_tensor = torch.FloatTensor(X_train_seq).to(DEVICE)
+        y_train_tensor = torch.FloatTensor(y_train_seq).unsqueeze(1).to(DEVICE)
+        X_val_tensor = torch.FloatTensor(X_val_seq).to(DEVICE)
+        y_val_tensor = torch.FloatTensor(y_val_seq).unsqueeze(1).to(DEVICE)
 
         # 构建模型
         self.model = self._build_model().to(DEVICE)
@@ -406,15 +416,21 @@ class LSTMModel(BaseModel):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
 
         # 创建数据加载器
-        dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
+        train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
         dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=self.batch_size, shuffle=True
+            train_dataset, batch_size=self.batch_size, shuffle=True
         )
+
+        # Early stopping 状态
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_state_dict = None
 
         # 训练
         self.model.train()
         progress_bar = tqdm(range(self.epochs), desc="LSTM Training", unit="epoch")
         for epoch in progress_bar:
+            # Train step
             total_loss = 0
             for batch_X, batch_y in dataloader:
                 optimizer.zero_grad()
@@ -425,15 +441,42 @@ class LSTMModel(BaseModel):
                 total_loss += loss.item()
 
             avg_loss = total_loss / len(dataloader)
-            progress_bar.set_postfix({"loss": f"{avg_loss:.4f}"})
+
+            # Validation step
+            self.model.eval()
+            with torch.no_grad():
+                val_outputs = self.model(X_val_tensor)
+                val_loss = criterion(val_outputs, y_val_tensor).item()
+
+            self.model.train()
+
+            # Early stopping 检查
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                best_state_dict = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+            else:
+                patience_counter += 1
+
+            progress_bar.set_postfix({"loss": f"{avg_loss:.4f}", "val_loss": f"{val_loss:.4f}"})
 
             if (epoch + 1) % 10 == 0 or epoch == 0:
-                logger.debug(f"Epoch [{epoch+1}/{self.epochs}], Loss: {avg_loss:.4f}")
+                logger.debug(f"Epoch [{epoch+1}/{self.epochs}], Loss: {avg_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+            if patience_counter >= self.early_stopping_patience:
+                logger.info(f"Early stopping at epoch {epoch+1}, best val loss: {best_val_loss:.4f}")
+                break
+
+        # 恢复最佳权重
+        if best_state_dict is not None:
+            self.model.load_state_dict(best_state_dict)
+            self.model.to(DEVICE)
 
         self.train_time = time.time() - start_time
         self.is_fitted = True
         progress_bar.close()
-        logger.info(f"LSTM 训练完成，耗时: {self.train_time:.2f}秒，设备: {DEVICE}")
+        logger.info(f"LSTM 训练完成，耗时: {self.train_time:.2f}秒，设备: {DEVICE}, "
+                     f"最佳 val_loss: {best_val_loss:.4f}")
 
         return self
 
@@ -490,7 +533,7 @@ class LightGBMModel(BaseModel):
 
     def __init__(
         self,
-        n_estimators: int = 100,
+        n_estimators: int = 200,
         max_depth: int = 6,
         learning_rate: float = 0.1,
         num_leaves: int = 31,
@@ -501,6 +544,7 @@ class LightGBMModel(BaseModel):
         reg_lambda: float = 0.0,
         random_state: int = 42,
         verbose: int = -1,
+        early_stopping_rounds: int = 50,
     ) -> None:
         """
         初始化 LightGBM 模型。
@@ -530,6 +574,7 @@ class LightGBMModel(BaseModel):
         self.reg_lambda = reg_lambda
         self.random_state = random_state
         self.verbose = verbose
+        self.early_stopping_rounds = early_stopping_rounds
         self.model = None
 
     def fit(
@@ -539,7 +584,7 @@ class LightGBMModel(BaseModel):
         **kwargs,
     ) -> "LightGBMModel":
         """
-        训练 LightGBM 模型。
+        训练 LightGBM 模型（带 early stopping）。
 
         Args:
             X: 特征矩阵。
@@ -551,6 +596,11 @@ class LightGBMModel(BaseModel):
         import lightgbm as lgb
 
         start_time = time.time()
+
+        # 拆分 80/20 train/val（时间序列保持顺序）
+        split_idx = int(len(X) * 0.8)
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
 
         self.model = lgb.LGBMClassifier(
             n_estimators=self.n_estimators,
@@ -566,11 +616,16 @@ class LightGBMModel(BaseModel):
             verbose=self.verbose,
             n_jobs=-1,
         )
-        self.model.fit(X, y)
+        self.model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            callbacks=[lgb.early_stopping(self.early_stopping_rounds, verbose=False)],
+        )
 
         self.train_time = time.time() - start_time
         self.is_fitted = True
-        print(f"  LightGBM 训练完成，耗时: {self.train_time:.2f}秒")
+        print(f"  LightGBM 训练完成，耗时: {self.train_time:.2f}秒, "
+              f"实际树数: {self.model.n_estimators_}")
 
         return self
 
