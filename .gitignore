@@ -41,6 +41,9 @@ models/
 # 回测运行时生成的文件（每次运行都会重新生成）
 docs/
 
+# 分析脚本运行时生成的输出
+output/
+
 # 测试生成的临时文件
 tests/test_outputs/
 .pytest_cache/

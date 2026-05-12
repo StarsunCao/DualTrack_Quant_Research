@@ -15,7 +15,7 @@
 DualTrack — это фреймворк для бэктестинга количественной торговли на Python 3.12+, поддерживающий:
 
 - **3 модели машинного обучения**: Logistic Regression, LSTM, LightGBM
-- **7+ больших языковых моделей**: DeepSeek V3.2/R1-14B/R1-8B, Qwen3.5, GLM-5 и др., с облачным и локальным развёртыванием
+- **6 больших языковых моделей**: DeepSeek-V3.2, V4-Flash, R1-8B, Qwen 3.5-397B, GLM-5.1, Gemma-4-31B, с облачным и локальным развёртыванием
 - **SmartPromptAgent**: Улучшенный LLM-агент с техническими индикаторами, историей цен и замкнутой памятью решений
 - **2 рынка**: Акции Китая (CSI300) и акции США (QQQ/NASDAQ-100)
 - **Независимый бэктестинг каналов**: Каждая модель генерирует сигналы и проводит бэктестинг независимо, без слияния сигналов
@@ -66,12 +66,11 @@ DualTrack — это фреймворк для бэктестинга колич
 | Модель | Развёртывание | Тестовые рынки | Описание |
 |--------|--------------|-----------------|----------|
 | `deepseek-v3.2` | Облако (SiliconFlow) | Акции Китая + США | DeepSeek V3.2 стандартная |
-| `deepseek-v3.2-reasoning` | Облако (SiliconFlow) | Акции Китая + США | DeepSeek V3.2 режим рассуждения |
-| `deepseek-r1-14b` | Локально (Ollama) | Акции Китая + США | DeepSeek R1 14B дистиллированная |
-| `deepseek-r1-8b` | Локально (Ollama) | Акции Китая + США | DeepSeek R1 8B облегчённая |
-| `qwen3.5` | Облако (SiliconFlow) | Только США | Qwen3.5 397B полная версия |
-| `qwen3.5-9b` | Локально (Ollama) | Ожидает | Qwen3.5 9B для развёртывания |
-| `glm-5` | Облако (SiliconFlow / DashScope) | Только США | GLM-5 |
+| `deepseek-v4-flash` | Облако (SiliconFlow) | Акции Китая + США | DeepSeek V4 Flash облегчённая |
+| `deepseek-r1-8b` | Локально (Ollama) | Акции Китая + США | DeepSeek R1 8B дистиллированная |
+| `qwen3.5-397b` | Облако (SiliconFlow) | Акции Китая + США | Qwen 3.5 397B полная версия |
+| `glm-5.1` | Облако (SiliconFlow / DashScope) | Акции Китая + США | GLM-5.1 |
+| `gemma-4-31b` | Облако (SiliconFlow) | Акции Китая + США | Gemma 4 31B открытая модель |
 
 ### SmartPromptAgent (Улучшенный LLM-агент)
 
@@ -91,12 +90,35 @@ uv run python main.py run_llm_agent_backtest \
   --start 2020-01-02 \
   --end 2024-12-31 \
   --executor siliconflow \
-  --model deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+  --model deepseek-ai/DeepSeek-V3.2
 ```
 
 > **Устройство локального развёртывания**: MacBook Air M2 (24 ГБ ОЗУ + 512 ГБ SSD)
 >
 > **Примечание о Qwen**: Из-за возможного срабатывания политической цензуры модели Qwen не тестировались на рынке акций Китая, только на рынке США.
+
+---
+
+## Дипломная работа
+
+На основе экспериментов данного проекта написана полная магистерская диссертация, состоящая из 4 глав:
+
+| Глава | Содержание | Файл |
+|-------|------------|------|
+| 1 | Литературный обзор: ML и LLM в количественных финансах | `thesis/sections/1.*` |
+| 2 | Методология: Дизайн двуканальной архитектуры | `thesis/sections/2.*` |
+| 3 | Эксперименты и результаты: кросс-рыночное эмпирическое сравнение | `thesis/sections/3.*` |
+| 4 | Выводы и перспективы | `thesis/sections/4.*` |
+
+**Архитектурные схемы** (5 рисунков в `thesis/figures/`):
+
+| Рисунок | Содержание |
+|---------|------------|
+| Рис. 1 | Архитектура двуканальной системы |
+| Рис. 2 | Конвейер обработки данных и Walk-Forward |
+| Рис. 3 | Механизм стробирования ячейки LSTM |
+| Рис. 5 | Структура промпта LLM и цепочечное рассуждение |
+| Рис. 6 | Архитектура SmartPromptAgent |
 
 ---
 
@@ -126,7 +148,7 @@ uv run python main.py run --track lgb --symbol QQQ
 
 # Бэктестинг LLM (требуется действительный кэш или API)
 uv run python main.py run --track deepseek-v3.2 --symbol CSI300
-uv run python main.py run --track glm-5 --symbol QQQ
+uv run python main.py run --track glm-5.1 --symbol QQQ
 
 # Полное сравнение моделей (требуются готовые кэши всех LLM)
 uv run python main.py run --track all --compare --symbol CSI300
@@ -170,10 +192,10 @@ uv run python main.py evaluate-advanced \
 ### Переменные окружения
 
 ```bash
-# SiliconFlow API (DeepSeek / Qwen / GLM-5 облако)
+# SiliconFlow API (DeepSeek / Qwen / GLM-5.1 / Gemma облако)
 export SILICONFLOW_API_KEY="your-key-here"
 
-# Alibaba DashScope (альтернативная точка доступа GLM-5)
+# Alibaba DashScope (альтернативная точка доступа GLM-5.1)
 export DASHSCOPE_API_KEY="your-key-here"
 
 # Локальный сервис Ollama
@@ -187,6 +209,11 @@ export OLLAMA_HOST="http://localhost:11434"
 ```
 ├── main.py                    # Точка входа CLI
 ├── pyproject.toml             # Управление зависимостями (uv)
+├── thesis/                    # Магистерская диссертация (4 главы)
+│   ├── sections/              # Файлы глав в формате markdown
+│   ├── figures/               # Архитектурные схемы (5 рисунков)
+│   ├── itmo-vkr-template/     # Шаблон LaTeX
+│   └── thesis_outline.md      # Структура диссертации
 ├── src/
 │   ├── data/                  # Получение и выравнивание данных
 │   │   ├── market_data.py     # OHLCV (akshare, yfinance)
@@ -194,7 +221,7 @@ export OLLAMA_HOST="http://localhost:11434"
 │   │   └── data_aligner.py    # Выравнивание по времени
 │   ├── models/
 │   │   ├── ml_track/          # ML каналы
-│   │   │   ├── features.py    # 50+ технических индикаторов
+│   │   │   ├── features.py    # 17 ключевых признаков (отбор по дисперсии + корреляции)
 │   │   │   └── baselines.py   # LR, LSTM, LightGBM
 │   │   ├── llm_track/         # LLM каналы
 │   │   │   ├── prompts.py     # CoT промпты для акций Китая
@@ -204,7 +231,6 @@ export OLLAMA_HOST="http://localhost:11434"
 │   │   │   └── enricher.py    # Обогатитель рыночных данных (индикаторы, цены, память)
 │   │   └── model_manager.py
 │   ├── orchestrator/          # Оркестрация сигналов
-│   │   ├── fusion_engine.py   # Движок слияния сигналов
 │   │   ├── signal_converter.py
 │   │   └── comparator.py
 │   ├── execution/             # Выполнение бэктестинга
@@ -219,17 +245,18 @@ export OLLAMA_HOST="http://localhost:11434"
 │       ├── market_state_analyzer.py
 │       ├── ml_explainer.py
 │       ├── llm_explainer.py
-│       └── cross_market_analyzer.py
+│       └── attribution_comparator.py
 ├── config/                    # YAML конфигурация
 │   ├── llm_config.yaml
 │   ├── ml_config.yaml
 │   ├── data_config.yaml
 │   └── backtest_config.yaml
-├── scripts/                   # Скрипты обработки данных и обучения
+├── scripts/                   # Скрипты обработки данных, обучения и анализа
 │   ├── train_ml_models.py
 │   ├── fetch_financial_news.py
-│   └── prepare_us_news.py
-├── models/                    # Предобученные модели
+│   ├── prepare_us_news.py
+│   └── chapter3_analysis.py   # Скрипт эмпирического анализа главы 3
+├── models/                    # Предобученные модели (версии Walk-Forward)
 ├── tests/                     # Модульные тесты
 └── data/                      # Файлы данных (.gitignore)
 ```
@@ -254,6 +281,10 @@ export OLLAMA_HOST="http://localhost:11434"
 
 Модели LSTM на PyTorch автоматически обнаруживают и используют ускорение MPS (Metal Performance Shaders).
 
+### 5. Обучение Walk-Forward
+
+ML-модели используют механизм проверки Walk-Forward с окном обучения 912 дней и частотой повторного обучения 182 дня. Отбор признаков снижает количество исходных признаков с 55 до 17 ключевых через порог дисперсии и исключение коррелированных.
+
 ---
 
 ## Измерения оценки
@@ -266,6 +297,20 @@ export OLLAMA_HOST="http://localhost:11434"
 | **Инженерные метрики** | Задержка вывода, пропускная способность, стоимость на альфа-сигнал |
 | **Состояние рынка** | Производительность в условиях Normal / High-Vol / Black-Swan |
 | **Интерпретируемость** | ML: SHAP атрибуция признаков; LLM: тематический анализ рассуждений |
+| **Статистическая устойчивость** | Тесты Jobson-Korkie, Bootstrap, KS для проверки значимости результатов |
+
+---
+
+## Ключевые эмпирические результаты
+
+| Результат | Детали |
+|-----------|--------|
+| **ML доминирует в акциях Китая** | LR: +9.34% vs BuyHold -5.23%, Sharpe 0.172, оборот 0.0019 |
+| **LLM конкурентоспособен в акциях США** | Qwen 3.5-397B: +22.80%, рынок QQQ с Beta Drift (+67.16%) |
+| **Уверенность LLM ≠ точность** | Корреляция близка к нулю (-0.055 до 0.064) у всех 6 моделей |
+| **Консервативное смещение** | LLM редко выражают высокую уверенность (≥0.80); V4-Flash пропустил 20.54% дней роста |
+| **Гиперинтерпретация** | Все 6 LLM коллективно шортили 2020-03-13 (день V-образного отскока, +8.47%) |
+| **Без статистической значимости** | ML-Ensemble vs LLM-Qwen: Jobson-Korkie p=0.8412, Bootstrap CI [-1.87, 2.06] |
 
 ---
 
@@ -286,7 +331,7 @@ export OLLAMA_HOST="http://localhost:11434"
 uv run pytest tests/ -v
 ```
 
-Полное тестовое покрытие, включая получение данных, ML каналы, LLM каналы, слияние сигналов, движок бэктестинга и модули оценки.
+Полное тестовое покрытие, включая получение данных, ML каналы, LLM каналы, движок бэктестинга и модули оценки.
 
 ---
 
@@ -319,6 +364,8 @@ docker run --rm dualtrack-quant python main.py run --track all --compare --symbo
 | Фаза 7: CLI и Docker | ✅ Завершено | Многоканальный CLI, контейнеризация |
 | Фаза 8: Расширенная оценка | ✅ Завершено | MAE/MFE, сегментация рыночных состояний, SHAP атрибуция |
 | Фаза 9: Архитектура агента | ✅ Завершено | SmartPromptAgent: индикаторы, цены, замкнутая память, нулевое заглядывание |
+| Фаза 10: Статистические тесты | ✅ Завершено | Jobson-Korkie, Bootstrap, KS, Хи-квадрат тесты |
+| Фаза 11: Написание диссертации | ✅ Завершено | 4 главы, 5 архитектурных схем, полный эмпирический анализ |
 
 ---
 

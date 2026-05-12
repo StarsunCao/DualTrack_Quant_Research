@@ -220,8 +220,8 @@ class SignalConverter:
         llm_signals: pd.DataFrame,
         ohlcv_dates: pd.DatetimeIndex = None,
         confidence_mode: str = "linear",
-        ema_alpha: float = 0.50,
-        decay_rate: float = 0.80,
+        ema_alpha: float = None,
+        decay_rate: float = None,
     ) -> dict:
         """
         将 LLM 信号转换为目标仓位（支持交易日对齐，T-1信号做T决策）。
@@ -235,8 +235,8 @@ class SignalConverter:
             confidence_mode: 置信度映射模式
                 - "linear": (C-0.5)*2，0.55→10%, 0.90→80% (新映射)
                 - "direct": C，0.55→55%, 0.90→90% (旧映射)
-            ema_alpha: EMA 平滑系数
-            decay_rate: 动态衰减速率
+            ema_alpha: EMA 平滑系数，None 时使用市场配置默认值
+            decay_rate: 动态衰减速率，None 时使用市场配置默认值
 
         Returns:
             目标仓位字典 {datetime: {symbol: weight}}
@@ -308,10 +308,11 @@ class SignalConverter:
         symbol = daily_df['symbol'].iloc[0] if 'symbol' in daily_df.columns else "CSI300"
         from ..config.market_config import MarketConfig
         market_config = MarketConfig.get_config_for_symbol(symbol)
+        # 优先使用传入的参数（支持敏感性分析），其次使用市场配置默认值
         daily_df = SignalConverter._apply_ema_smoothing(
             daily_df, symbol,
-            ema_alpha=market_config.ema_alpha,
-            decay_rate=market_config.decay_rate,
+            ema_alpha=ema_alpha if ema_alpha is not None else market_config.ema_alpha,
+            decay_rate=decay_rate if decay_rate is not None else market_config.decay_rate,
             weak_buy_threshold=market_config.weak_buy_threshold,
             weak_short_threshold=market_config.weak_short_threshold,
         )

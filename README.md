@@ -15,11 +15,12 @@
 DualTrack is a Python 3.12+ dual-track quantitative backtesting framework that supports:
 
 - **3 Machine Learning Models**: Logistic Regression, LSTM, LightGBM
-- **7+ Large Language Models**: DeepSeek V3.2/R1-14B/R1-8B, Qwen3.5, GLM-5, etc., with cloud and local deployment
+- **6 Large Language Models**: DeepSeek-V3.2, V4-Flash, R1-8B, Qwen 3.5-397B, GLM-5.1, Gemma-4-31B, with cloud and local deployment
 - **SmartPromptAgent**: State-enhanced LLM agent with technical indicators, price history, and closed-loop decision memory
 - **2 Markets**: A-Shares (CSI300) and US Stocks (QQQ/NASDAQ-100)
 - **Independent Track Backtesting**: Each model generates signals and backtests independently, no signal fusion
 - **Multi-Dimensional Evaluation**: Financial metrics (Sharpe, MaxDD, WinRate) + Engineering metrics (Latency, Cost)
+- **Complete Master's Thesis**: 4 chapters covering literature review, methodology, empirical results, and conclusions
 
 ---
 
@@ -30,10 +31,10 @@ DualTrack is a Python 3.12+ dual-track quantitative backtesting framework that s
 │                    DualTrack Testbed                       │
 ├────────────────────────────────────────────────────────────┤
 │  ML Tracks                             LLM Tracks          │
-│  ┌──────┐ ┌──────┐ ┌──────┐    ┌─────────┐ ┌─────────┐     │
+│  ┌──────┐ ┌────── ┌──────┐    ┌─────────┐ ┌─────────┐     │
 │  │ LR   │ │LSTM  │ │ LGB  │    │DeepSeek │ │  Qwen   │     │
-│  │(Linear)│(Seq.)│(Ensemble)   │ R1/GLM  │ │ Series  │     │
-│  └──┬───┘ └──┬───┘ └──┬───┘    └────┬────┘ └────┬────┘     │
+│  │(Linear)│(Seq.)│(Ensemble)   │ V3/V4/R1│ │ GLM/Gemma│    │
+│  └──┬─── └──┬───┘ └──┬───┘    └────┬────┘ └────┬────┘     │
 │     └────────┼────────┘             └─────┬──────┘         │
 │              ▼                            ▼                │
 │  ┌──────────────────────┐  ┌──────────────────────────┐    │
@@ -65,13 +66,12 @@ DualTrack is a Python 3.12+ dual-track quantitative backtesting framework that s
 
 | Model | Deployment | Tested Markets | Description |
 |-------|-----------|----------------|-------------|
-| `deepseek-v3.2` | Cloud (SiliconFlow) | A-Shares + US | DeepSeek V3.2 standard |
-| `deepseek-v3.2-reasoning` | Cloud (SiliconFlow) | A-Shares + US | DeepSeek V3.2 reasoning mode |
-| `deepseek-r1-14b` | Local (Ollama) | A-Shares + US | DeepSeek R1 14B distilled |
-| `deepseek-r1-8b` | Local (Ollama) | A-Shares + US | DeepSeek R1 8B lightweight |
-| `qwen3.5` | Cloud (SiliconFlow) | US only | Qwen3.5 397B full version |
-| `qwen3.5-9b` | Local (Ollama) | Pending | Qwen3.5 9B deployable |
-| `glm-5` | Cloud (SiliconFlow / DashScope) | US only | GLM-5 |
+| `deepseek-v3.2` | Cloud (SiliconFlow) | CSI300 + QQQ | DeepSeek V3.2 standard |
+| `deepseek-v4-flash` | Cloud (SiliconFlow) | CSI300 + QQQ | DeepSeek V4 Flash lightweight |
+| `deepseek-r1-8b` | Local (Ollama) | CSI300 + QQQ | DeepSeek R1 8B distilled reasoning model |
+| `qwen3.5-397b` | Cloud (SiliconFlow) | CSI300 + QQQ | Qwen 3.5 397B full version |
+| `glm-5.1` | Cloud (SiliconFlow / DashScope) | CSI300 + QQQ | GLM-5.1 |
+| `gemma-4-31b` | Cloud (SiliconFlow) | CSI300 + QQQ | Gemma 4 31B open model |
 
 ### SmartPromptAgent (State-Enhanced LLM Agent)
 
@@ -91,12 +91,33 @@ uv run python main.py run_llm_agent_backtest \
   --start 2020-01-02 \
   --end 2024-12-31 \
   --executor siliconflow \
-  --model deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+  --model deepseek-ai/DeepSeek-V3.2
 ```
 
 > **Local Deployment Device**: MacBook Air M2 (24GB RAM + 512GB SSD)
->
-> **Qwen Note**: Due to potential political sensitivity triggers, Qwen models were not tested on the A-Shares market, only on US stocks.
+
+---
+
+## Thesis
+
+A complete master's thesis has been written based on this project's experiments, organized into 4 chapters:
+
+| Chapter | Content | File |
+|---------|---------|------|
+| 1 | Literature Review: ML & LLM in quantitative finance | `thesis/sections/1.*` |
+| 2 | Methodology: Dual-track architecture design | `thesis/sections/2.*` |
+| 3 | Experiments & Results: Cross-market empirical comparison | `thesis/sections/3.*` |
+| 4 | Conclusions & Future Work | `thesis/sections/4.*` |
+
+**Architecture Diagrams** (5 figures in `thesis/figures/`):
+
+| Figure | Content |
+|--------|---------|
+| Fig 1 | Dual-Track System Architecture |
+| Fig 2 | Data Processing and Walk-Forward Pipeline |
+| Fig 3 | LSTM Cell Gating Mechanism |
+| Fig 5 | LLM Prompt Structure and Chain-of-Thought Reasoning |
+| Fig 6 | SmartPromptAgent Architecture |
 
 ---
 
@@ -126,7 +147,7 @@ uv run python main.py run --track lgb --symbol QQQ
 
 # LLM model backtest (requires valid cache or API)
 uv run python main.py run --track deepseek-v3.2 --symbol CSI300
-uv run python main.py run --track glm-5 --symbol QQQ
+uv run python main.py run --track glm-5.1 --symbol QQQ
 
 # Full model comparison (requires all LLM caches ready)
 uv run python main.py run --track all --compare --symbol CSI300
@@ -170,7 +191,7 @@ uv run python main.py evaluate-advanced \
 ### Environment Variables
 
 ```bash
-# SiliconFlow API (DeepSeek / Qwen / GLM-5 cloud)
+# SiliconFlow API (DeepSeek / Qwen / GLM-5 / Gemma cloud)
 export SILICONFLOW_API_KEY="your-key-here"
 
 # Alibaba DashScope (GLM-5 alternative endpoint)
@@ -187,6 +208,11 @@ export OLLAMA_HOST="http://localhost:11434"
 ```
 ├── main.py                    # CLI entry point
 ├── pyproject.toml             # Dependency management (uv)
+├── thesis/                    # Master's thesis (4 chapters)
+│   ├── sections/              # Chapter markdown files
+│   ├── figures/               # Architecture diagrams (5 figures)
+│   ├── itmo-vkr-template/     # LaTeX template
+│   └── thesis_outline.md      # Thesis outline
 ├── src/
 │   ├── data/                  # Data acquisition and alignment
 │   │   ├── market_data.py     # OHLCV (akshare, yfinance)
@@ -194,7 +220,7 @@ export OLLAMA_HOST="http://localhost:11434"
 │   │   └── data_aligner.py    # Time alignment
 │   ├── models/
 │   │   ├── ml_track/          # ML tracks
-│   │   │   ├── features.py    # 50+ technical indicators
+│   │   │   ├── features.py    # 55→17 core features (variance + correlation)
 │   │   │   └── baselines.py   # LR, LSTM, LightGBM
 │   │   ├── llm_track/         # LLM tracks
 │   │   │   ├── prompts.py     # A-Shares CoT prompts
@@ -204,7 +230,6 @@ export OLLAMA_HOST="http://localhost:11434"
 │   │   │   └── enricher.py    # Market data enricher (indicators, prices, memory)
 │   │   └── model_manager.py
 │   ├── orchestrator/          # Signal orchestration
-│   │   ├── fusion_engine.py   # Signal fusion engine
 │   │   ├── signal_converter.py
 │   │   └── comparator.py
 │   ├── execution/             # Backtest execution
@@ -219,17 +244,18 @@ export OLLAMA_HOST="http://localhost:11434"
 │       ├── market_state_analyzer.py
 │       ├── ml_explainer.py
 │       ├── llm_explainer.py
-│       └── cross_market_analyzer.py
+│       └── attribution_comparator.py
 ├── config/                    # YAML configuration
 │   ├── llm_config.yaml
 │   ├── ml_config.yaml
 │   ├── data_config.yaml
 │   └── backtest_config.yaml
-├── scripts/                   # Data processing and training scripts
+├── scripts/                   # Data processing, training, and analysis
 │   ├── train_ml_models.py
 │   ├── fetch_financial_news.py
-│   └── prepare_us_news.py
-├── models/                    # Pre-trained models
+│   ├── prepare_us_news.py
+│   └── chapter3_analysis.py   # Chapter 3 empirical analysis script
+├── models/                    # Pre-trained models (Walk-Forward versions)
 ├── tests/                     # Unit tests
 └── data/                      # Data files (.gitignore)
 ```
@@ -254,6 +280,10 @@ LLM API calls are expensive and unstable; the project supports `.jsonl` format o
 
 PyTorch LSTM models automatically detect and use MPS (Metal Performance Shaders) acceleration.
 
+### 5. Walk-Forward Training
+
+ML models use 912-day training window with 182-day retrain frequency. Feature selection reduces 55 features to 17 core features via variance threshold + correlation dedup.
+
 ---
 
 ## Evaluation Dimensions
@@ -266,17 +296,20 @@ PyTorch LSTM models automatically detect and use MPS (Metal Performance Shaders)
 | **Engineering Metrics** | Inference latency, throughput, cost per alpha signal |
 | **Market State** | Performance under Normal / High-Vol / Black-Swan conditions |
 | **Interpretability** | ML: SHAP feature attribution; LLM: Reasoning topic analysis |
+| **Statistical Robustness** | Jobson-Korkie, Bootstrap, KS tests for performance significance |
 
 ---
 
-## Core Research Questions
+## Key Empirical Findings
 
-1. **Fitting vs Reasoning**: Which paradigm is more suitable for quantitative trading — traditional ML or LLMs?
-2. **Speed vs Intelligence**: Low-latency fitting vs high-latency reasoning, which wins?
-3. **Cloud vs Local**: Is LLM semantic understanding worth the extra API cost?
-4. **Model Scale**: How do LLMs of different parameter sizes perform in quant tasks?
-5. **Black Swan Events**: Can LLM semantic understanding provide tail protection during extreme market conditions?
-6. **Cross-Market Generalization**: Can the same system work for both A-Shares and US stocks?
+| Finding | Detail |
+|---------|--------|
+| **ML dominates in A-Shares** | LR: +9.34% vs BuyHold -5.23%, Sharpe 0.172, turnover 0.0019 |
+| **LLM competitive in US stocks** | Qwen 3.5-397B: +22.80%, QQQ market with strong Beta Drift (+67.16%) |
+| **LLM confidence ≠ accuracy** | Correlation near zero (-0.055 to 0.064) across all 6 models |
+| **Conservative bias** | LLMs rarely express high confidence (≥0.80); miss 20.54% of up days (V4-Flash) |
+| **Over-interpretation** | All 6 LLMs collectively short on 2020-03-13 (V-shaped rebound day, +8.47%) |
+| **No statistical significance** | ML-Ensemble vs LLM-Qwen: Jobson-Korkie p=0.8412, Bootstrap CI [-1.87, 2.06] |
 
 ---
 
@@ -311,14 +344,16 @@ docker run --rm dualtrack-quant python main.py run --track all --compare --symbo
 | Phase | Status | Description |
 |-------|--------|-------------|
 | Phase 1: Data Layer | ✅ Done | OHLCV acquisition, news data, time alignment |
-| Phase 2: ML Tracks | ✅ Done | LR, LSTM, LightGBM |
-| Phase 3: LLM Tracks | ✅ Done | DeepSeek, Qwen, GLM-5, Ollama |
-| Phase 4: Orchestrator | ✅ Done | Independent signal conversion |
+| Phase 2: ML Tracks | ✅ Done | LR, LSTM, LightGBM + Walk-Forward + feature selection |
+| Phase 3: LLM Tracks | ✅ Done | 6 models (DeepSeek V3.2/V4/R1, Qwen, GLM-5.1, Gemma) |
+| Phase 4: Orchestrator | ✅ Done | Signal conversion for both tracks |
 | Phase 5: Execution Engine | ✅ Done | Backtrader backtest wrapper |
 | Phase 6: Evaluation | ✅ Done | Multi-dimensional metrics, visualization |
 | Phase 7: CLI & Docker | ✅ Done | Multi-track CLI, containerization |
 | Phase 8: Advanced Evaluation | ✅ Done | MAE/MFE, market state segmentation, SHAP attribution |
-| Phase 9: Agent Architecture | ✅ Done | SmartPromptAgent: indicators, price history, closed-loop memory, zero look-ahead |
+| Phase 9: Agent Architecture | ✅ Done | SmartPromptAgent: indicators, price history, closed-loop memory |
+| Phase 10: Statistical Tests | ✅ Done | Jobson-Korkie, Bootstrap, KS, Chi-square |
+| Phase 11: Thesis Writing | ✅ Done | 4 chapters, 5 architecture diagrams, full empirical analysis |
 
 ---
 
