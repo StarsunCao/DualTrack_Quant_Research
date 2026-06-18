@@ -43,6 +43,10 @@ docs/
 
 # 分析脚本运行时生成的输出
 output/
+outputs/
+
+# 答辩与演示材料（本地生成，不属于程序代码仓库）
+defense/
 
 # 测试生成的临时文件
 tests/test_outputs/

@@ -196,11 +196,11 @@ class MarketStateAnalyzer:
     """
 
     STATE_NAMES = {
-        MarketState.BULL_QUIET: "牛市平静",
-        MarketState.BULL_VOLATILE: "牛市波动",
-        MarketState.NEUTRAL: "震荡市",
-        MarketState.BEAR_VOLATILE: "熊市波动",
-        MarketState.CRISIS: "危机模式",
+        MarketState.BULL_QUIET: "Bull Quiet",
+        MarketState.BULL_VOLATILE: "Bull Volatile",
+        MarketState.NEUTRAL: "Neutral",
+        MarketState.BEAR_VOLATILE: "Bear Volatile",
+        MarketState.CRISIS: "Crisis",
     }
 
     STATE_COLORS = {
@@ -365,8 +365,9 @@ class MarketStateAnalyzer:
                 drawdown = (nav_state - cummax) / cummax
                 max_drawdown = abs(drawdown.min())
 
-                # Win rate (needs trade log)
-                win_rate = 0.0
+                # Win rate. Prefer realized trade PnL when a trade log is supplied;
+                # otherwise use the share of positive daily strategy returns.
+                win_rate = (state_returns > 0).mean()
                 trade_count = 0
                 if trade_log is not None and isinstance(trade_log, pd.DataFrame) and not trade_log.empty:
                     # 匹配该状态下的交易
@@ -543,7 +544,7 @@ class MarketStateAnalyzer:
         if not summaries:
             logger.warning("没有策略数据可供对比")
             fig, ax = plt.subplots(figsize=figsize)
-            ax.text(0.5, 0.5, "没有策略数据", ha="center", va="center")
+            ax.text(0.5, 0.5, "No strategy data", ha="center", va="center")
             return fig
 
         # 构建数据矩阵
@@ -581,22 +582,22 @@ class MarketStateAnalyzer:
             fmt = ".1%"
             cmap = "RdYlGn"
             center = 0
-            title = "各策略在不同市场状态下的收益率"
+            title = "Strategy Returns Across Market States"
         elif metric == "sharpe":
             fmt = ".2f"
             cmap = "RdYlGn"
             center = 0
-            title = "各策略在不同市场状态下的夏普比率"
+            title = "Strategy Sharpe Ratios Across Market States"
         elif metric == "max_drawdown":
             fmt = ".1%"
             cmap = "RdYlGn_r"
             center = 0
-            title = "各策略在不同市场状态下的最大回撤"
+            title = "Strategy Maximum Drawdowns Across Market States"
         else:
             fmt = ".1%"
             cmap = "RdYlGn"
             center = 0.5
-            title = "各策略在不同市场状态下的胜率"
+            title = "Strategy Win Rates Across Market States"
 
         sns.heatmap(
             data,
@@ -610,8 +611,8 @@ class MarketStateAnalyzer:
             linewidths=0.5,
         )
 
-        ax.set_xlabel("市场状态")
-        ax.set_ylabel("策略")
+        ax.set_xlabel("Market State")
+        ax.set_ylabel("Strategy")
         ax.set_title(title, fontsize=14, fontweight="bold")
 
         plt.tight_layout()
@@ -643,7 +644,7 @@ class MarketStateAnalyzer:
         if not summaries:
             logger.warning("没有策略数据可供对比")
             fig, ax = plt.subplots(figsize=figsize)
-            ax.text(0.5, 0.5, "没有策略数据", ha="center", va="center")
+            ax.text(0.5, 0.5, "No strategy data", ha="center", va="center")
             return fig
 
         strategies = list(summaries.keys())
@@ -665,15 +666,15 @@ class MarketStateAnalyzer:
         for i, strategy in enumerate(strategies):
             summary = summaries[strategy]
             returns = [
-                summary.state_metrics.get(s, MarketStateMetrics(s, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)).total_return
+                summary.state_metrics.get(s, MarketStateMetrics(s, "")).total_return
                 for s in state_order
             ]
             ax1.bar(x + i * width, returns, width, label=strategy)
 
         ax1.set_xticks(x + width * (len(strategies) - 1) / 2)
         ax1.set_xticklabels([self.STATE_NAMES[s] for s in state_order], rotation=45, ha="right")
-        ax1.set_ylabel("收益率")
-        ax1.set_title("收益率对比", fontweight="bold")
+        ax1.set_ylabel("Return")
+        ax1.set_title("Return Comparison", fontweight="bold")
         ax1.legend(loc="upper right", fontsize=8)
         ax1.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
 
@@ -682,15 +683,15 @@ class MarketStateAnalyzer:
         for i, strategy in enumerate(strategies):
             summary = summaries[strategy]
             sharpes = [
-                summary.state_metrics.get(s, MarketStateMetrics(s, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)).sharpe
+                summary.state_metrics.get(s, MarketStateMetrics(s, "")).sharpe
                 for s in state_order
             ]
             ax2.bar(x + i * width, sharpes, width, label=strategy)
 
         ax2.set_xticks(x + width * (len(strategies) - 1) / 2)
         ax2.set_xticklabels([self.STATE_NAMES[s] for s in state_order], rotation=45, ha="right")
-        ax2.set_ylabel("夏普比率")
-        ax2.set_title("夏普比率对比", fontweight="bold")
+        ax2.set_ylabel("Sharpe Ratio")
+        ax2.set_title("Sharpe Ratio Comparison", fontweight="bold")
         ax2.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
 
         # 3. 最大回撤对比
@@ -698,15 +699,15 @@ class MarketStateAnalyzer:
         for i, strategy in enumerate(strategies):
             summary = summaries[strategy]
             drawdowns = [
-                summary.state_metrics.get(s, MarketStateMetrics(s, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)).max_drawdown
+                summary.state_metrics.get(s, MarketStateMetrics(s, "")).max_drawdown
                 for s in state_order
             ]
             ax3.bar(x + i * width, drawdowns, width, label=strategy)
 
         ax3.set_xticks(x + width * (len(strategies) - 1) / 2)
         ax3.set_xticklabels([self.STATE_NAMES[s] for s in state_order], rotation=45, ha="right")
-        ax3.set_ylabel("最大回撤")
-        ax3.set_title("最大回撤对比", fontweight="bold")
+        ax3.set_ylabel("Maximum Drawdown")
+        ax3.set_title("Maximum Drawdown Comparison", fontweight="bold")
 
         # 4. 危机期间表现
         ax4 = axes[1, 1]
@@ -714,17 +715,17 @@ class MarketStateAnalyzer:
         overall_returns = [summaries[s].overall_return for s in strategies]
 
         x = np.arange(len(strategies))
-        ax4.bar(x - 0.2, overall_returns, 0.4, label="总体收益", color="steelblue")
-        ax4.bar(x + 0.2, crisis_returns, 0.4, label="危机期间收益", color="indianred")
+        ax4.bar(x - 0.2, overall_returns, 0.4, label="Overall Return", color="steelblue")
+        ax4.bar(x + 0.2, crisis_returns, 0.4, label="Crisis Return", color="indianred")
 
         ax4.set_xticks(x)
         ax4.set_xticklabels(strategies, rotation=45, ha="right")
-        ax4.set_ylabel("收益率")
-        ax4.set_title("总体收益 vs 危机期间收益", fontweight="bold")
+        ax4.set_ylabel("Return")
+        ax4.set_title("Overall Return vs Crisis Return", fontweight="bold")
         ax4.legend()
         ax4.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
 
-        plt.suptitle("多策略市场状态表现对比", fontsize=14, fontweight="bold", y=1.02)
+        plt.suptitle("Multi-Strategy Performance Across Market States", fontsize=14, fontweight="bold", y=1.02)
         plt.tight_layout()
 
         if save_path:

@@ -165,6 +165,21 @@ def sharpe_ratio(returns: np.ndarray, rf: float = 0.0, periods: int = 252) -> fl
     return np.sqrt(periods) * np.mean(excess_returns) / np.std(excess_returns)
 
 
+def unannualized_sharpe_ratio(returns: np.ndarray, rf: float = 0.0) -> float:
+    """
+    计算未年化夏普比率。
+
+    Jobson-Korkie 检验的渐近方差公式以单期收益的 Sharpe 比率为输入。
+    展示指标可以年化，但检验统计量内部不应再乘以 sqrt(252)，否则会
+    系统性放大 Sharpe 项并扭曲方差估计。
+    """
+    excess_returns = returns - rf
+    std = np.std(excess_returns, ddof=1)
+    if std == 0:
+        return 0.0
+    return np.mean(excess_returns) / std
+
+
 def jobson_korkie_test(returns_a: np.ndarray, returns_b: np.ndarray, rf: float = 0.0) -> Tuple[float, float]:
     """
     Jobson-Korkie 检验：检验两个夏普比率的差异是否显著。
@@ -181,9 +196,9 @@ def jobson_korkie_test(returns_a: np.ndarray, returns_b: np.ndarray, rf: float =
     """
     n = len(returns_a)
 
-    # 计算夏普比率
-    sr_a = sharpe_ratio(returns_a, rf)
-    sr_b = sharpe_ratio(returns_b, rf)
+    # 计算单期夏普比率。注意：检验公式使用未年化 Sharpe。
+    sr_a = unannualized_sharpe_ratio(returns_a, rf)
+    sr_b = unannualized_sharpe_ratio(returns_b, rf)
 
     # 计算所需统计量
     mean_a = np.mean(returns_a - rf)
@@ -228,10 +243,11 @@ def bootstrap_sharpe_difference(returns_a: np.ndarray, returns_b: np.ndarray,
     """
     n = len(returns_a)
     sr_diffs = []
+    rng = np.random.default_rng(42)
 
     for _ in range(n_bootstrap):
         # 有放回采样
-        indices = np.random.choice(n, size=n, replace=True)
+        indices = rng.choice(n, size=n, replace=True)
         sample_a = returns_a[indices]
         sample_b = returns_b[indices]
 
@@ -275,9 +291,10 @@ def bootstrap_max_drawdown_difference(returns_a: np.ndarray, returns_b: np.ndarr
 
     n = len(returns_a)
     dd_diffs = []
+    rng = np.random.default_rng(42)
 
     for _ in range(n_bootstrap):
-        indices = np.random.choice(n, size=n, replace=True)
+        indices = rng.choice(n, size=n, replace=True)
         sample_a = returns_a[indices]
         sample_b = returns_b[indices]
 

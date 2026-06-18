@@ -477,7 +477,7 @@ def plot_equity_curves_with_llm(ml_results: dict, llm_results: dict, symbol: str
 
 
 def plot_signal_distribution(ml_signals: dict, llm_signals: dict, symbol: str):
-    """信号分布图（图 9）：堆积柱状图展示 buy/short/hold 比例。"""
+    """信号分布图（图 9）：堆积柱状图展示 buy / bearish / hold 比例。"""
     fig, ax = plt.subplots(figsize=(14, 7))
 
     categories = []
@@ -504,10 +504,10 @@ def plot_signal_distribution(ml_signals: dict, llm_signals: dict, symbol: str):
         categories.append(f"LLM-{name}")
         sig = sig_df["signal"].str.lower()
         buy_pct = (sig == "buy").mean()
-        short_pct = (sig == "short").mean()
-        hold_pct = 1 - buy_pct - short_pct
+        bearish_pct = sig.isin(["short", "sell"]).mean()
+        hold_pct = 1 - buy_pct - bearish_pct
         buy_data.append(buy_pct * 100)
-        short_data.append(short_pct * 100)
+        short_data.append(bearish_pct * 100)
         hold_data.append(hold_pct * 100)
 
     x = np.arange(len(categories))
@@ -516,7 +516,7 @@ def plot_signal_distribution(ml_signals: dict, llm_signals: dict, symbol: str):
     ax.bar(x, buy_data, width, label='Buy', color='#2ecc71', edgecolor='white')
     ax.bar(x, hold_data, width, bottom=buy_data, label='Hold/Neutral', color='#95a5a6', edgecolor='white')
     ax.bar(x, short_data, width, bottom=[b+h for b,h in zip(buy_data, hold_data)],
-           label='Short', color='#e74c3c', edgecolor='white')
+           label='Bearish', color='#e74c3c', edgecolor='white')
 
     ax.set_ylabel('Signal Distribution (%)', fontsize=12)
     ax.set_title(f'{symbol} Signal Distribution by Model', fontsize=14)
@@ -534,7 +534,7 @@ def plot_signal_distribution(ml_signals: dict, llm_signals: dict, symbol: str):
     # 保存 CSV
     df = pd.DataFrame({
         'model': categories, 'buy_pct': buy_data,
-        'hold_pct': hold_data, 'short_pct': short_data
+        'hold_pct': hold_data, 'bearish_pct': short_data
     })
     df.to_csv(TABLES_DIR / "table7_signal_distribution.csv", index=False)
 
